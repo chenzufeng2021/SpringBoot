@@ -2,7 +2,84 @@
 typora-copy-images-to: SpringBootNotesPictures
 ---
 
-# 实例
+# 基本介绍
+
+## 什么是 AOP<sup><a href="#ref1">[1]</a></sup>
+
+**AOP** 为 **Aspect Oriented Programming** 的缩写，意为：面向切面编程，通过==预编译==方式和==运行期动态代理==实现程序功能的统一维护的一种技术。
+
+利用 **AOP** 可以==对业务逻辑的各个部分进行隔离==，从而使得业务逻辑各部分之间的耦合度降低，提高程序的可重用性，同时提高了开发的效率。
+
+**一个 AOP 的使用场景：**
+
+> 假设一个已经上线的系统运行出现问题，有时运行得很慢。为了检测出是哪个环节出现了问题，就需要监控每一个方法的执行时间，再根据执行时间进行分析判断。
+>
+> 由于整个系统里的方法数量十分庞大，如果一个个方法去修改工作量将会十分巨大，而且这些监控方法在分析完毕后还需要移除掉，所以这种方式并不合适。
+>
+> 如果能够在系统运行过程中动态添加代码，就能很好地解决这个需求。
+>
+> 这种==在系统运行时动态添加代码==的方式称为面向切面编程（**AOP**）
+
+## AOP 相关概念介绍
+
+- **Joinpoint**（连接点）：==类里面可以被增强的方法==即为连接点。例如，想要修改哪个方法的功能，那么该方法就是一个链接点。
+
+- **Target**（目标对象）：==要增强的类==成为 **Target**。
+
+- **Pointcut**（切入点）：==对 **Jointpoint** 进行拦截的定义==即为切入点。例如，拦截所有以 **insert** 开始的方法，这个定义即为切入点。
+
+- **Advice**（通知）：==拦截到 **Jointpoint** 之后要做的事情==就是通知。通知分为前置通知、后置通知、异常通知、最终通知和环绕通知。例如，前面说到的打印日志监控就是通知。
+
+- **Aspect**（切面）：即 **Pointcut** 和 **Advice** 的结合。
+
+
+
+## 切面类注解
+
+- **@Aspect** 注解：表明这是一个切面类。
+
+- **@Pointcut** 注解：表明这是一个切入点（`@Pointcut("execution(* com.example.demo.service.*.*(..))")`）。**execution** 中
+
+  - 第一个 ***** 表示==方法返回任意值==；
+
+  - 第二个 ***** 表示 ==**service** 包下的任意类==；
+
+  - 第三个 ***** 表示==类中的任意方法==，括号中的==两个点表示方法参数任意==，即这里描述的切入点为 **service** 包下所有类中的所有方法。
+
+- **@Before** 注解：表示这是一个前置通知，该方法在目标方法之前执行。
+  - 通过 **JoinPoint** 参数可以获取目标方法的方法名、修饰符等信息。
+
+- **@After** 注解：表示这是一个后置通知，该方法在目标执行之后执行。
+
+- **@AfterReturning** 注解：表示这是一个返回通知，在该方法中可以获取目标方法的返回值。
+
+  - **returning** 参数是指返回值的变量名，对应方法的参数。
+
+  - **注意**：本样例在方法参数中定义 **result** 的类型为 **Object**，表示目标方法的返回值可以是任意类型。若 **result** 参数的类型为 **Long**，则该方法只能处理目标方法返回值为 **Long** 的情况。
+
+- **@AfterThrowing** 注解：表示这是一个异常通知，即当目标方法发生异常，该方法会被调用。
+
+  - 样例中设置的异常类型为 **Exception** 表示所有的异常都会进入该方法中执行。
+
+  - 若异常类型为 **ArithmeticException** 则表示只有目标方法抛出的 **ArithmeticException** 异常才会进入该方法的处理。
+
+- **@Around** 注解：表示这是一个环绕通知。环绕通知是所有通知里功能最为强大的通知，可以实现前置通知、后置通知、异常通知以及返回通知的功能。
+  - 目标方法进入环绕通知后，通过调用 **ProceedingJointPoint** 对象的 **proceed** 方法使目标方法继续执行，开发者可以在次修改目标方法的执行参数、返回值值，并且可以在此目标方法的异常。
+
+## 依赖
+
+**Spring Boot** 在 **Spring** 的基础上对 **AOP** 的配置提供了自动化配置解决方案，只需要修改 **pom.xml** 文件，添加 **spring-boot-starter-aop** 依赖即可：
+
+```xml
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-aop</artifactId>
+</dependency>
+```
+
+
+
+# 实例一
 
 参考链接：
 
@@ -217,4 +294,234 @@ public class SysLogAspect {
     }
 }
 ```
+
+# 实例二<sup><a href="#ref1">[1]</a></sup>
+
+## 搭建环境
+
+![切面-搭建环境2](SpringBootNotesPictures/切面-搭建环境2.png)
+
+## 引入依赖
+
+```xml
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-web</artifactId>
+</dependency>
+
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-aop</artifactId>
+</dependency>
+
+<dependency>
+    <groupId>ch.qos.logback</groupId>
+    <artifactId>logback-classic</artifactId>
+    <version>1.2.3</version>
+</dependency>
+```
+
+## 创建controller
+
+```java
+package com.example.controller;
+
+import com.example.service.UserService;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+/**
+ * @author chenzufeng
+ * @date 2021/11/7
+ * @usage HelloController
+ */
+@RestController
+@RequestMapping("/HelloController")
+public class HelloController {
+    @Autowired
+    private UserService userService;
+    
+    @GetMapping("/getUserById")
+    public String getUserById(Integer id) {
+        return userService.getUserById(id);
+    }
+}
+```
+
+
+
+## 创建service
+
+```java
+package com.example.service;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+
+/**
+ * @author chenzufeng
+ * @date 2021/11/7
+ * @usage UserService
+ */
+@Service
+public class UserService {
+    private static final Logger logger = LoggerFactory.getLogger(UserService.class);
+
+    public String getUserById(Integer id) {
+        logger.info("接口调用方法getUserById：{}", id);
+        try {
+            Thread.sleep(2000);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+        return "chenzufeng";
+    }
+}
+```
+
+## 创建切面
+
+### 切面类
+
+```java
+package com.example.aspect;
+
+import org.aspectj.lang.JoinPoint;
+import org.aspectj.lang.ProceedingJoinPoint;
+import org.aspectj.lang.annotation.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
+
+/**
+ * @author chenzufeng
+ * @date 2021/11/7
+ * @usage LogAspect
+ */
+@Aspect
+@Component
+public class LogAspect {
+    private static final Logger logger = LoggerFactory.getLogger(LogAspect.class);
+
+    /**
+     * 方法返回任意值，service包下任意类、类中任意方法、任意参数
+     */
+    @Pointcut("execution(* com.example.service.*.*(..))")
+    public void pointCut() {}
+
+    /**
+     * 前置通知
+     * @param joinPoint joinPoint
+     */
+    @Before(value = "pointCut()")
+    public void before(JoinPoint joinPoint) {
+        String name = joinPoint.getSignature().getName();
+        logger.info("{} 方法开始执行。。。", name);
+    }
+
+    /**
+     * 后置通知
+     * @param joinPoint joinPoint
+     */
+    @After(value = "pointCut()")
+    public void after(JoinPoint joinPoint) {
+        String name = joinPoint.getSignature().getName();
+        logger.info("{} 方法执行结束！", name);
+    }
+
+    /**
+     * 返回通知
+     * @param joinPoint joinPoint
+     * @param result 方法返回值
+     */
+    @AfterReturning(value = "pointCut()", returning = "result")
+    public void afterReturning(JoinPoint joinPoint, Object result) {
+        String name = joinPoint.getSignature().getName();
+        logger.info("{} 方法返回值为 {}", name, result);
+    }
+
+    /**
+     * 异常通知
+     * @param joinPoint joinPoint
+     * @param exception 异常
+     */
+    @AfterThrowing(value = "pointCut()", throwing = "exception")
+    public void afterThrowing(JoinPoint joinPoint, Exception exception) {
+        String name = joinPoint.getSignature().getName();
+        logger.info("{} 方法抛出 {} 异常！", name, exception);
+    }
+
+    /**
+     * 环绕通知
+     * @param proceedingJoinPoint proceedingJoinPoint
+     */
+    @Around(value = "pointCut()")
+    public Object afterThrowing(ProceedingJoinPoint proceedingJoinPoint) throws Throwable {
+        String name = proceedingJoinPoint.getSignature().getName();
+        // 统计方法执行时间
+        Long startTime = System.currentTimeMillis();
+        Object result = proceedingJoinPoint.proceed();
+        Long endTime = System.currentTimeMillis();
+        logger.info("{} 方法执行时间为 {} ms！", name, endTime - startTime);
+        return result;
+    }
+}
+```
+
+
+
+### 切面类注解详解
+
+- **@Aspect** 注解：表明这是一个切面类。
+
+- **@Pointcut** 注解：表明这是一个切入点（`@Pointcut("execution(* com.example.demo.service.*.*(..))")`）。**execution** 中
+
+  - 第一个 ***** 表示==方法返回任意值==；
+
+  - 第二个 ***** 表示 ==**service** 包下的任意类==；
+
+  - 第三个 ***** 表示==类中的任意方法==，括号中的==两个点表示方法参数任意==，即这里描述的切入点为 **service** 包下所有类中的所有方法。
+
+- **@Before** 注解：表示这是一个前置通知，该方法在目标方法之前执行。
+  - 通过 **JoinPoint** 参数可以获取目标方法的方法名、修饰符等信息。
+
+- **@After** 注解：表示这是一个后置通知，该方法在目标执行之后执行。
+
+- **@AfterReturning** 注解：表示这是一个返回通知，在该方法中可以获取目标方法的返回值。
+
+  - **returning** 参数是指返回值的变量名，对应方法的参数。
+
+  - **注意**：本样例在方法参数中定义 **result** 的类型为 **Object**，表示目标方法的返回值可以是任意类型。若 **result** 参数的类型为 **Long**，则该方法只能处理目标方法返回值为 **Long** 的情况。
+
+- **@AfterThrowing** 注解：表示这是一个异常通知，即当目标方法发生异常，该方法会被调用。
+
+  - 样例中设置的异常类型为 **Exception** 表示所有的异常都会进入该方法中执行。
+
+  - 若异常类型为 **ArithmeticException** 则表示只有目标方法抛出的 **ArithmeticException** 异常才会进入该方法的处理。
+
+- **@Around** 注解：表示这是一个环绕通知。环绕通知是所有通知里功能最为强大的通知，可以实现前置通知、后置通知、异常通知以及返回通知的功能。
+  - 目标方法进入环绕通知后，通过调用 **ProceedingJointPoint** 对象的 **proceed** 方法使目标方法继续执行，开发者可以在次修改目标方法的执行参数、返回值值，并且可以在此目标方法的异常。
+
+## 测试
+
+在浏览器中输入：[http://localhost:8080/HelloController/getUserById?id=11](http://localhost:8080/HelloController/getUserById?id=11)
+
+控制台返回：
+
+```markdown
+getUserById 方法开始执行。。。
+接口调用方法getUserById：11
+getUserById 方法返回值为 chenzufeng
+getUserById 方法执行结束！
+getUserById 方法执行时间为 2028 ms！
+```
+
+
+
+# 参考资料
+
+<span name="ref1">[1] [SpringBoot - 面向切面编程 AOP 的配置和使用（附样例）](https://www.hangge.com/blog/cache/detail_2527.html)</span>
 

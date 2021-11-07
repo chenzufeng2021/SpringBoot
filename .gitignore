@@ -1,3 +1,9 @@
+HELP.md
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
 ### 忽略文件夹 ###
 SpringBootBooks/
 
