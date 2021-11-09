@@ -22,4 +22,9 @@ public class UserService {
         }
         return "chenzufeng";
     }
+
+    public String getInfo(String message) {
+        logger.info("接口调用getInfo方法：{}", message);
+        return message;
+    }
 }

@@ -4,6 +4,7 @@ import com.example.service.UserService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -20,5 +21,10 @@ public class HelloController {
     @GetMapping("/getUserById")
     public String getUserById(Integer id) {
         return userService.getUserById(id);
+    }
+
+    @GetMapping("/getInfo")
+    public String getInfo(@RequestParam String message) {
+        return userService.getInfo(message);
     }
 }
