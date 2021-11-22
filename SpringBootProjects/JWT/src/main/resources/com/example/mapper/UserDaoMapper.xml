@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.dao.UserDao">
+
+    <!--
+      自己组装一个结果集并返回一个结果集
+      1. 当【数据库中字段名称】与【实体类对象的属性名】不一致时，可以进行转换
+      2. 当前查询的结果没有对应一个表时，可以自定义一个结果集
+    -->
+    <resultMap id="BaseResultMap" type="com.example.entity.User">
+        <!-- id：标识主键字段；
+              column：数据库中的字段名称（user_name）
+              property：映射对象（实体对象）的属性名称（userName）
+              jdbcType：数据库中字段类型（可省略）
+         -->
+        <id column="id" jdbcType="INTEGER" property="id" />
+        <!-- 除了主键以外的数据库中字段名称 -->
+        <result column="user_name" jdbcType="VARCHAR" property="userName" />
+        <result column="password" jdbcType="VARCHAR" property="password" />
+    </resultMap>
+
+    <!-- sql语句片段，将公共的部分抽取出来，不用写select *影响效率 -->
+    <sql id="query_base">
+        SELECT
+            *
+        FROM
+            t_user
+    </sql>
+
+    <sql id="search_fragment">
+        <trim prefix="WHERE" prefixOverrides="AND | OR">
+            <if test="userName != null and userName != ''">
+                AND user_name = #{userName}
+            </if>
+            <if test="password != null and password != ''">
+                AND password = #{password}
+            </if>
+        </trim>
+    </sql>
+
+    <select id="login" resultMap="BaseResultMap">
+        <include refid="query_base"/>
+        <include refid="search_fragment"/>
+    </select>
+
+</mapper>
