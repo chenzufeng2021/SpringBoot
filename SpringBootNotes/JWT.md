@@ -1085,3 +1085,5 @@ public class InterceptorConfig implements WebMvcConfigurer {
 
 [2] <span name="ref2">[Druid连接池的意义以及使用](https://www.cnblogs.com/Jeely/p/12364571.html)</span>
 https://mp.weixin.qq.com/s?__biz=MzIwODkzOTc1MQ==&mid=2247490055&idx=1&sn=9064aa07be4a992e745ae2e6a23ef3b9&chksm=977a258fa00dac993306849008f14f11601c2eddc1ef61064b7ab26f8ad26deba22ea6ab07aa&mpshare=1&srcid=1122g0q2KpovHSXWb7NTRHOR&sharer_sharetime=1637582887966&sharer_shareid=d909de58bd04a6e0b051cff74b16d914&from=singlemessage&scene=1&subscene=10000&clicktime=1637650064&enterid=1637650064&ascene=1&devicetype=android-30&version=28001053&nettype=WIFI&abtest_cookie=AAACAA%3D%3D&lang=zh_CN&exportkey=A1RJ2G%2Fu3SlEcE1DwyheUbw%3D&pass_ticket=%2FVgrwfvEmUqJ4tvcGoGi%2FyS3uQM1hNEPrPpcoDsYZ0ARR0e33fL1XX3Opit2P4TC&wx_header=1
+
+https://zhuanlan.zhihu.com/p/77239645
