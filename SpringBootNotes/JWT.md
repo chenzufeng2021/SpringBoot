@@ -4,6 +4,97 @@ typora-copy-images-to: SpringBootNotesPictures
 
 # 什么是JWT
 
+Json web token (JWT)，是为了在网络应用环境间传递声明而执行的一种基于JSON的开放标准（RFC 7519）。
+
+该token被设计为紧凑且安全的，特别适用于分布式站点的单点登录（SSO）场景。
+
+JWT的声明一般被用来在身份提供者和服务提供者间传递被认证的用户身份信息，以便于从资源服务器获取资源，也可以增加一些额外的其它业务逻辑所必须的声明信息，该token也可直接被用于认证，也可被加密。
+
+## JWT由三部分构成
+
+```markdown
+eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiYWRtaW4iOnRydWV9.UQmqAUhUrpDVV2ST7mZKyLTomVfg7sYkEjmdDI5XF8Q
+```
+
+第一部分我们称它为==头部==（header），第二部分我们称其为==载荷==（payload，类似于飞机上承载的物品），第三部分是==签证==（signature）。
+
+### header
+
+jwt的头部承载==两部分==信息：
+
+- 声明类型，这里是jwt
+- 声明加密的算法，通常直接使用 ==HMAC SHA256==
+
+完整的头部就像下面这样的JSON：
+```markdown
+{
+  'typ': 'JWT',
+  'alg': 'HS256'
+}
+```
+
+然后将头部进行==base64加密==（该加密是可以对称解密的），构成了第一部分：
+```markdown
+eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9
+```
+
+### playload
+
+载荷就是==存放有效信息==的地方。这个名字像是特指飞机上承载的货品，这些有效信息包含三个部分
+
+- 标准中注册的声明
+- 公共的声明
+- 私有的声明
+
+#### 标准中注册的声明（建议但不强制使用）
+
+- iss: jwt签发者
+- sub: jwt所面向的用户
+- aud: 接收jwt的一方
+- exp: jwt的过期时间，这个过期时间必须要大于签发时间
+- nbf: 定义在什么时间之前，该jwt都是不可用的
+- iat: jwt的签发时间
+- jti: jwt的唯一身份标识，主要用来作为一次性token，从而回避重放攻击。
+
+#### 公共的声明
+
+公共的声明可以添加任何的信息，一般添加用户的相关信息或其他业务需要的必要信息。但==不建议添加敏感信息==，因为该部分在客户端可解密。
+
+#### 私有的声明
+
+私有声明是提供者和消费者所共同定义的声明，一般不建议存放敏感信息，因为base64是对称解密的，意味着该部分信息可以归类为==明文信息==。
+
+定义一个payload：
+```markdown
+{
+  "sub": "1234567890",
+  "name": "John Doe",
+  "admin": true
+}
+```
+
+然后将其进行base64加密，得到Jwt的第二部分：
+```markdown
+eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiYWRtaW4iOnRydWV9
+```
+
+### signature
+
+jwt的第三部分是一个签证信息，这个签证信息由三部分组成：
+
+- header (base64后的)
+- payload (base64后的)
+- secret
+
+<font color=red>这个部分需要base64加密后的header和base64加密后的payload使用</font>。连接组成的字符串（头部在前），通过header中声明的加密方式使用密钥secret进行组合加密，然后就构成了jwt的第三部分：
+```markdown
+UQmqAUhUrpDVV2ST7mZKyLTomVfg7sYkEjmdDI5XF8Q
+```
+
+密钥secret是保存在服务端的，服务端会根据这个密钥进行生成token和验证，所以需要保护好。
+
+
+
 # 搭建环境
 
 ## 创建项目
@@ -993,4 +1084,6 @@ public class InterceptorConfig implements WebMvcConfigurer {
 # 参考资料
 
 [2] <span name="ref2">[Druid连接池的意义以及使用](https://www.cnblogs.com/Jeely/p/12364571.html)</span>
+https://mp.weixin.qq.com/s?__biz=MzIwODkzOTc1MQ==&mid=2247490055&idx=1&sn=9064aa07be4a992e745ae2e6a23ef3b9&chksm=977a258fa00dac993306849008f14f11601c2eddc1ef61064b7ab26f8ad26deba22ea6ab07aa&mpshare=1&srcid=1122g0q2KpovHSXWb7NTRHOR&sharer_sharetime=1637582887966&sharer_shareid=d909de58bd04a6e0b051cff74b16d914&from=singlemessage&scene=1&subscene=10000&clicktime=1637650064&enterid=1637650064&ascene=1&devicetype=android-30&version=28001053&nettype=WIFI&abtest_cookie=AAACAA%3D%3D&lang=zh_CN&exportkey=A1RJ2G%2Fu3SlEcE1DwyheUbw%3D&pass_ticket=%2FVgrwfvEmUqJ4tvcGoGi%2FyS3uQM1hNEPrPpcoDsYZ0ARR0e33fL1XX3Opit2P4TC&wx_header=1
 
+https://zhuanlan.zhihu.com/p/77239645
