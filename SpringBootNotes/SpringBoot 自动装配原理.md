@@ -275,7 +275,7 @@ public class RedisAutoConfiguration {
 
 ### @EnableConfigurationProperties
 
-但是我们注意到上面的注解，<font color=red>**@EnableConfigurationProperties(RedisProperties.class)**使得被**@ConfigurationProperties**修饰的类生效</font>。
+但是我们注意到上面的注解，<font color=red>**@EnableConfigurationProperties(RedisProperties.class)**使得被**@ConfigurationProperties**修饰的类生效</font>（将 properties 中的属性映射到 RedisProperties 这个成员属性中）。
 
 ### @ConfigurationProperties
 

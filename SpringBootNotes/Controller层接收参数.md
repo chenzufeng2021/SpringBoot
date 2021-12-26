@@ -249,9 +249,53 @@ public void demo(Person person) {
 }
 ```
 
-### @RequestBody接收多个对象
+### @RequestBody接收多个实体对象
 
 https://blog.csdn.net/hunt_er/article/details/109678025
+
+一个方法只能写一个`@RequestBody`注解：SpringMVC中@RequestBody是读取的流的方式，在第一个参数取到后，把`request.getInputStream()`关闭，导致后面的@RequestBody的对象拿取不到，就会报错。
+
+https://blog.csdn.net/weixin_28937805/article/details/113683071
+
+创建一个类用于接收参数，该类需要有两个public属性的实体：
+
+```java
+Class TwoBeans {
+    public Users users;
+    public Mails mails;
+}
+```
+
+`controller`：
+
+```java
+public void usersAndMailsSave(@RequestBody TwoBeans twoBeans) {
+	service.usersAndMailsSave(twoBeans.Users, twoBeans.Mails)
+}
+```
+
+前台json数据格式：
+
+```json
+{
+    "Users": {
+            "name": "梅老板",
+            "telephone": "182352346288",
+            "gender": "男",
+            "age": "12",
+            "address": "d园",
+            "username": "messi"
+    },
+
+    "Mail": {
+            "userId": "222",
+            "mail": "aaa@126.com",
+            "password": "123123"
+    }
+}
+```
+
+
 
 ## @GetMapping 组合注解
 
@@ -281,8 +325,9 @@ public class HelloController {
 https://blog.csdn.net/aliyacl/article/details/85089035
 https://blog.csdn.net/walkerjong/article/details/7946109/
 
-
 # 参考资料
+
+[2] [SpringBoot使用@RequestBody接收多个对象的解决办法](https://blog.csdn.net/hunt_er/article/details/109678025)
 
 https://mp.weixin.qq.com/s?__biz=MzU4Njc5MjE4Mw==&mid=2247484427&idx=1&sn=9514b1767beaa1bb5f15cbaa5c176c9c&chksm=fdf4a993ca832085e565d4d4493791556f5c3cedfc1ff2dda23172a64dbbfaae15eb8b86ef71&token=2141916767&lang=zh_CN#rd
 
