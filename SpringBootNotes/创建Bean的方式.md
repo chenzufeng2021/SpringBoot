@@ -8,7 +8,7 @@ Spring是创建和管理bean的工厂，它提供了多种定义bean的方式。
 
 # xml文件配置bean
 
-`xml配置bean`是Spring最早支持的方式。随着`SpringBoot`的发展，该方法目前已经用得很少了。
+`xml配置bean`是Spring最早支持的方式。随着 SpringBoot 的发展，该方法目前已经用得很少了。
 
 ## 构造器
 
@@ -195,7 +195,7 @@ public class PersonService {
 
 通过这种`@Component`扫描注解的方式定义bean的前提是：**需要先<font color=red>配置扫描路径</font>**。
 
-目前常用的配置扫描路径的方式如下：
+目前常用的<font color=red>配置扫描路径的方式</font>如下：
 
 1. 在`applicationContext.xml`文件中使用`<context:component-scan>`标签：
 
@@ -265,7 +265,7 @@ public class MyConfiguration {
 
 在JavaConfig==类==上加`@Configuration`注解，相当于配置了`<beans>`标签。而在==方法==上加`@Bean`注解，相当于配置了`<bean>`标签。
 
-此外，Springboot还引入了一些列的`@Conditional`注解，用来控制bean的创建：
+此外，Springboot还引入了一些列的`@Conditional`注解，用来==控制bean的创建==：
 
 ```java
 @Configuration
@@ -304,7 +304,7 @@ Spring中使用比较多的Conditional还有：
 
 ## 普通类
 
-Spring4.2之后`@Import`注解可以实例化==普通类的bean实例==。
+Spring4.2之后`@Import`注解可以==实例化普通类的bean实例==。
 
 先定义Role类：
 
@@ -342,6 +342,423 @@ public class TestController {
     }
 }
 ```
+
+我们没有在任何地方定义过Role的bean，但spring却能自动创建该类的bean实例，这是为什么呢？
+
+这正是`@Import`注解的强大之处。
+
+`@Import`注解能==定义单个类的bean==，但如果==有多个类需要定义bean==该怎么办呢？
+
+```java
+@Import({Role.class, User.class})
+@Configuration
+public class MyConfig {
+}
+```
+
+如果你想偷懒，不想写这种`MyConfig`类，可以将@Import加到SpringBoot的启动类上：
+
+```java
+
+@Import({Role.class, User.class})
+@SpringBootApplication(exclude = {DataSourceAutoConfiguration.class,
+        DataSourceTransactionManagerAutoConfiguration.class})
+public class Application {
+    public static void main(String[] args) {
+        new SpringApplicationBuilder(Application.class).web(WebApplicationType.SERVLET).run(args);
+    }
+}
+```
+
+SpringBoot的启动类一般都会加@SpringBootApplication注解，该注解上加了@SpringBootConfiguration注解。而@SpringBootConfiguration注解，上面又加了@Configuration注解。
+
+所以，SpringBoot启动类本身带有@Configuration注解的功能。
+
+## Configuration类
+
+上面介绍了@Import注解导入普通类的方法，它同时也支持导入Configuration类。
+
+先定义一个Configuration类：
+
+```java
+@Configuration
+public class MyConfig2 {
+
+    @Bean
+    public User user() {
+        return  new User();
+    }
+
+    @Bean
+    public Role role() {
+        return new Role();
+    }
+}
+```
+
+然后在另外一个Configuration类中引入前面的Configuration类：
+
+```java
+@Import({MyConfig2.class})
+@Configuration
+public class MyConfig {
+}
+```
+
+这种方式，如果MyConfig2类已经在Spring指定的扫描目录或者子目录下，则MyConfig类会显得有点多余。因为MyConfig2类本身就是一个配置类，它里面就能定义bean。
+
+但如果MyConfig2类不在指定的Spring扫描目录或者子目录下，则通过MyConfig类的导入功能，也能把MyConfig2类识别成配置类。
+
+### Swagger
+
+Swagger作为一个优秀的文档生成框架，在Spring项目中越来越受欢迎。接下来，我们以Swagger2为例，介绍一下它是如何导入相关类的。
+
+引入Swagger相关jar包之后，只需要在SpringBoot的启动类上加上`@EnableSwagger2`注解，就能开启Swagger的功能。
+
+其中@EnableSwagger2注解中导入了`Swagger2DocumentationConfiguration`类：
+
+```java
+@Retention(RetentionPolicy.RUNTIME)
+@Target({ElementType.TYPE})
+@Documented
+@Import({Swagger2DocumentationConfiguration.class})
+public @interface EnableSwagger2 {
+}
+```
+
+该类是一个Configuration类，它又导入了另外两个类：
+
+- SpringfoxWebMvcConfiguration
+- SwaggerCommonConfiguration
+
+```java
+@Configuration
+@Import({SpringfoxWebMvcConfiguration.class, SwaggerCommonConfiguration.class})
+@ComponentScan(
+    basePackages = {"springfox.documentation.swagger2.mappers"}
+)
+@ConditionalOnWebApplication
+public class Swagger2DocumentationConfiguration {
+    public Swagger2DocumentationConfiguration() {
+    }
+
+    @Bean
+    public JacksonModuleRegistrar swagger2Module() {
+        return new Swagger2JacksonModule();
+    }
+
+    @Bean
+    public HandlerMapping swagger2ControllerMapping(Environment environment, DocumentationCache documentationCache, ServiceModelToSwagger2Mapper mapper, JsonSerializer jsonSerializer) {
+        return new PropertySourcedRequestMappingHandlerMapping(environment, new Swagger2Controller(environment, documentationCache, mapper, jsonSerializer));
+    }
+}
+```
+
+`SpringfoxWebMvcConfiguration`类又会导入新的Configuration类，并且通过`@ComponentScan`注解扫描了一些其他的路径：
+
+```java
+@Configuration
+@Import({ModelsConfiguration.class})
+@ComponentScan(
+    basePackages = {"springfox.documentation.spring.web.scanners", 
+                    "springfox.documentation.spring.web.readers.operation", 
+                    "springfox.documentation.spring.web.readers.parameter", 
+                    "springfox.documentation.spring.web.plugins", 
+                    "springfox.documentation.spring.web.paths"}
+)
+@EnablePluginRegistries({DocumentationPlugin.class, 
+                         ApiListingBuilderPlugin.class, OperationBuilderPlugin.class, 
+                         ParameterBuilderPlugin.class, ExpandedParameterBuilderPlugin.class, 
+                         ResourceGroupingStrategy.class, OperationModelsProviderPlugin.class, 
+                         DefaultsProviderPlugin.class, PathDecorator.class, ApiListingScannerPlugin.class})
+public class SpringfoxWebMvcConfiguration {
+    public SpringfoxWebMvcConfiguration() {
+    }
+
+    @Bean
+    public Defaults defaults() {
+        return new Defaults();
+    }
+    ......
+}
+```
+
+`SwaggerCommonConfiguration`同样也通过@ComponentScan注解扫描了一些额外的路径：
+
+```java
+@Configuration
+@ComponentScan(
+    basePackages = {"springfox.documentation.swagger.schema", 
+                    "springfox.documentation.swagger.readers", 
+                    "springfox.documentation.swagger.web"}
+)
+public class SwaggerCommonConfiguration {
+    public SwaggerCommonConfiguration() {
+    }
+}
+```
+
+如此一来，我们通过一个简单的`@EnableSwagger2`注解，就能轻松的导入swagger所需的一系列bean，并且拥有swagger的功能。
+
+## ImportSelector
+
+上面提到的Configuration类，它的功能非常强大。但它不太适合==加复杂的判断条件==，<font color=red>根据某些条件定义这些bean，根据另外的条件定义那些bean</font>。
+
+那么，这种需求该怎么实现呢？
+
+这时就可以使用`ImportSelector`接口了。
+
+首先定义一个类实现`ImportSelector`接口：
+
+```java
+public class DataImportSelector implements ImportSelector {
+    @Override
+    public String[] selectImports(AnnotationMetadata importingClassMetadata) {
+        return new String[]{"com.sue.async.service.User", "com.sue.async.service.Role"};
+    }
+}
+```
+
+重写`selectImports`方法，在该方法中指定需要定义bean的类名，注意要包含完整路径，而非相对路径。
+
+然后在MyConfig类上@Import导入这个类即可：
+
+```java
+@Import({DataImportSelector.class})
+@Configuration
+public class MyConfig {
+}
+```
+
+这个注解还有更牛逼的用途。
+
+@EnableAutoConfiguration注解中导入了`AutoConfigurationImportSelector`类，并且里面包含系统参数名称：`spring.boot.enableautoconfiguration`：
+
+```java
+@Target({ElementType.TYPE})
+@Retention(RetentionPolicy.RUNTIME)
+@Documented
+@Inherited
+@AutoConfigurationPackage
+@Import({AutoConfigurationImportSelector.class})
+public @interface EnableAutoConfiguration {
+    String ENABLED_OVERRIDE_PROPERTY = "spring.boot.enableautoconfiguration";
+
+    Class<?>[] exclude() default {};
+
+    String[] excludeName() default {};
+}
+```
+
+AutoConfigurationImportSelector类实现了`ImportSelector`接口：
+
+![AutoConfigurationImportSelector](SpringBootNotesPictures/AutoConfigurationImportSelector.webp)
+
+并且重写了`selectImports`方法，<font color=red>该方法会根据某些注解去找所有需要创建bean的类名，然后返回这些类名</font>。其中在查找这些类名之前，先调用isEnabled方法，判断是否需要继续查找：
+
+```java
+public String[] selectImports(AnnotationMetadata annotationMetadata) {
+    if (!this.isEnabled(annotationMetadata)) {
+        return NO_IMPORTS;
+    } else {
+        AutoConfigurationImportSelector.AutoConfigurationEntry autoConfigurationEntry = this.getAutoConfigurationEntry(annotationMetadata);
+        return StringUtils.toStringArray(autoConfigurationEntry.getConfigurations());
+    }
+}
+```
+
+该方法会根据`ENABLED_OVERRIDE_PROPERTY`的值（`spring.boot.enableautoconfiguration`）来作为判断条件：
+
+```java
+protected boolean isEnabled(AnnotationMetadata metadata) {
+    return this.getClass() == AutoConfigurationImportSelector.class ? (Boolean)this.getEnvironment().getProperty("spring.boot.enableautoconfiguration", Boolean.class, true) : true;
+}
+```
+
+这里能根据==系统参数==控制bean是否需要被实例化。
+
+实现ImportSelector接口的好处主要有以下两点：
+
+1. 把某个功能的相关类，可以放到一起，方面管理和维护。
+2. 重写selectImports方法时，能够根据条件判断某些类是否需要被实例化，或者某个条件实例化这些bean，其他的条件实例化那些bean等。我们能够非常灵活的定制化bean的实例化。
+
+## ImportBeanDefinitionRegistrar
+
+通过上面的这种方式，确实能够非常灵活的自定义bean。
+
+但它的自定义能力，还是有限的，它没法==自定义bean的名称和作用域==等属性。
+
+有需求，就有解决方案。
+
+接下来，我们一起看看`ImportBeanDefinitionRegistrar`接口的神奇之处。
+
+先定义CustomImportSelector类实现ImportBeanDefinitionRegistrar接口：
+
+```java
+public class CustomImportSelector implements ImportBeanDefinitionRegistrar {
+
+    @Override
+    public void registerBeanDefinitions(AnnotationMetadata importingClassMetadata, BeanDefinitionRegistry registry) {
+        RootBeanDefinition roleBeanDefinition = new RootBeanDefinition(Role.class);
+        registry.registerBeanDefinition("role", roleBeanDefinition);
+
+        RootBeanDefinition userBeanDefinition = new RootBeanDefinition(User.class);
+        userBeanDefinition.setScope(ConfigurableBeanFactory.SCOPE_PROTOTYPE);
+        registry.registerBeanDefinition("user", userBeanDefinition);
+    }
+}
+```
+
+重写`registerBeanDefinitions`方法，在该方法中我们可以获取`BeanDefinitionRegistry`对象，通过它去注册bean。不过在注册bean之前，我们先要创建BeanDefinition对象，它里面可以自定义bean的名称、作用域等很多参数。
+
+然后在MyConfig类上导入上面的类：
+
+```java
+@Import({CustomImportSelector.class})
+@Configuration
+public class MyConfig {
+}
+```
+
+fegin功能，就是使用ImportBeanDefinitionRegistrar接口实现的。
+
+
+
+# PostProcessor
+
+Spring提供了专门注册bean的接口：`BeanDefinitionRegistryPostProcessor`。
+
+该接口的方法`postProcessBeanDefinitionRegistry`上有这样一段描述：
+
+```java
+public interface BeanDefinitionRegistryPostProcessor extends BeanFactoryPostProcessor {
+
+	/**
+	 * Modify the application context's internal bean definition registry after its
+	 * standard initialization. All regular bean definitions will have been loaded,
+	 * but no beans will have been instantiated yet. This allows for adding further
+	 * bean definitions before the next post-processing phase kicks in.
+	 * @param registry the bean definition registry used by the application context
+	 * @throws org.springframework.beans.BeansException in case of errors
+	 */
+	void postProcessBeanDefinitionRegistry(BeanDefinitionRegistry registry) throws BeansException;
+
+}
+```
+
+在标准初始化后，修改应用程序上下文的内部bean定义注册表。所有常规bean定义都将被加载，但是还没有bean被实例化。这允许在下一个后处理阶段开始之前，进一步添加定义bean。
+
+如果用这个接口来定义bean，我们要做的事情就变得非常简单了。只需定义一个类实现`BeanDefinitionRegistryPostProcessor`接口：
+
+```java
+@Component
+public class MyRegistryPostProcessor implements BeanDefinitionRegistryPostProcessor {
+    @Override
+    public void postProcessBeanDefinitionRegistry(BeanDefinitionRegistry registry) throws BeansException {
+        RootBeanDefinition roleBeanDefinition = new RootBeanDefinition(Role.class);
+        registry.registerBeanDefinition("role", roleBeanDefinition);
+
+        RootBeanDefinition userBeanDefinition = new RootBeanDefinition(User.class);
+        userBeanDefinition.setScope(ConfigurableBeanFactory.SCOPE_PROTOTYPE);
+        registry.registerBeanDefinition("user", userBeanDefinition);
+    }
+
+    @Override
+    public void postProcessBeanFactory(ConfigurableListableBeanFactory beanFactory) throws BeansException {
+    }
+}
+```
+
+重写`postProcessBeanDefinitionRegistry`方法，在该方法中能够获取`BeanDefinitionRegistry`对象，它负责bean的注册工作。
+
+不过细心的朋友可能会发现，里面还多了一个`postProcessBeanFactory`方法，没有做任何实现。
+
+这个方法其实是它的父接口：`BeanFactoryPostProcessor`里的方法
+
+```java
+@FunctionalInterface
+public interface BeanFactoryPostProcessor {
+
+	/**
+	 * Modify the application context's internal bean factory after its standard
+	 * initialization. All bean definitions will have been loaded, but no beans
+	 * will have been instantiated yet. This allows for overriding or adding
+	 * properties even to eager-initializing beans.
+	 * @param beanFactory the bean factory used by the application context
+	 * @throws org.springframework.beans.BeansException in case of errors
+	 */
+	void postProcessBeanFactory(ConfigurableListableBeanFactory beanFactory) throws BeansException;
+
+}
+```
+
+在应用程序上下文的标准bean工厂之后修改其内部bean工厂初始化。所有bean定义都已加载，但没有bean将被实例化。这允许重写或添加属性甚至可以初始化bean。
+
+```java
+@Component
+public class MyPostProcessor implements BeanFactoryPostProcessor {
+
+    @Override
+    public void postProcessBeanFactory(ConfigurableListableBeanFactory beanFactory) throws BeansException {
+        DefaultListableBeanFactory registry = (DefaultListableBeanFactory)beanFactory;
+        RootBeanDefinition roleBeanDefinition = new RootBeanDefinition(Role.class);
+        registry.registerBeanDefinition("role", roleBeanDefinition);
+
+        RootBeanDefinition userBeanDefinition = new RootBeanDefinition(User.class);
+        userBeanDefinition.setScope(ConfigurableBeanFactory.SCOPE_PROTOTYPE);
+        registry.registerBeanDefinition("user", userBeanDefinition);
+    }
+}
+```
+
+既然这两个接口都能注册bean，那么他们有什么区别？
+
+- BeanDefinitionRegistryPostProcessor 更侧重于bean的注册
+- BeanFactoryPostProcessor 更侧重于对已经注册的bean的属性进行修改，虽然也可以注册bean。
+
+此时，有些朋友可能会问：既然拿到BeanDefinitionRegistry对象就能注册bean，那通过BeanFactoryAware的方式是不是也能注册bean呢？
+
+从下面这张图能够看出DefaultListableBeanFactory就实现了BeanDefinitionRegistry接口：
+
+![DefaultListableBeanFactory](SpringBootNotesPictures/DefaultListableBeanFactory.webp)
+
+这样一来，我们如果能够<font color=red>获取DefaultListableBeanFactory对象的实例，然后调用它的注册方法，就可以注册bean了</font>。
+
+定义一个类实现`BeanFactoryAware`接口：
+
+```java
+@Component
+public class BeanFactoryRegistry implements BeanFactoryAware {
+    @Override
+    public void setBeanFactory(BeanFactory beanFactory) throws BeansException {
+        DefaultListableBeanFactory registry = (DefaultListableBeanFactory) beanFactory;
+        RootBeanDefinition rootBeanDefinition = new RootBeanDefinition(User.class);
+        registry.registerBeanDefinition("user", rootBeanDefinition);
+
+        RootBeanDefinition userBeanDefinition = new RootBeanDefinition(User.class);
+        userBeanDefinition.setScope(ConfigurableBeanFactory.SCOPE_PROTOTYPE);
+        registry.registerBeanDefinition("user", userBeanDefinition);
+    }
+}
+```
+
+重写`setBeanFactory`方法，在该方法中能够获取BeanFactory对象，它能够强制转换成DefaultListableBeanFactory对象，然后通过该对象的实例注册bean。
+
+当你满怀喜悦的运行项目时，发现竟然报错了：
+
+![报错](SpringBootNotesPictures/报错.webp)
+
+为什么会报错？
+
+## Spring中bean的创建过程
+
+Spring中bean的创建过程顺序大致如下：
+
+<img src="SpringBootNotesPictures/Spring中bean的创建过程.webp" alt="图片" style="zoom:67%;" />
+
+`BeanFactoryAware`接口是在bean创建成功，并且完成依赖注入之后，在真正初始化之前才被调用的。在这个时候去注册bean意义不大，因为这个接口是给我们获取bean的，并不建议去注册bean，会引发很多问题。
+
+此外，ApplicationContextRegistry和ApplicationListener接口也有类似的问题，我们可以用他们获取bean，但不建议用它们注册bean。
 
 
 

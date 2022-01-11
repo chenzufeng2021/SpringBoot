@@ -17,3 +17,5 @@ SpringBoot 提供了针对日常企业应用研发各种场景的 spring-boot-st
 # 参考资料
 
 [1] [SpringBoot应用篇（一）：自定义starter ](https://www.cnblogs.com/hello-shf/p/10864977.html)
+
+https://juejin.cn/post/6997974861058424862#heading-4
