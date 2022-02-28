@@ -37,6 +37,8 @@ public class YmApplication {
 
 这样 SpringBoot 在启动的时候，就会运行这个类的 run 方法。
 
+![@SpringBootApplication注解](SpringBootNotesPictures/@SpringBootApplication注解.png)
+
 ## @SpringBootApplication
 
 `@SpringBootApplication`注解是一个组合注解：

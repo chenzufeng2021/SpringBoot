@@ -126,3 +126,179 @@ server.servlet.context-path=/firstSpringBootDemo
 Tomcat started on port(s): 8081 (http) with context path '/firstSpringBootDemo'
 ```
 
+
+
+# 解析
+
+## 依赖解读
+
+```xml
+<parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>2.5.5</version>
+    <relativePath/> <!-- lookup parent from repository -->
+</parent>
+```
+
+`<parent>`标签用于==版本控制==：引入的WEB模块`starter`的时候，不用指定版本号
+
+```xml
+<!-- SpringBoot 框架 Web 项目起步依赖 -->
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-web</artifactId>
+</dependency>
+```
+
+
+
+为什么引入`spring-boot-starter-web`就能使用`Spring MVC`的功能？
+
+`spring-boot-starter-web`启动器的依赖（`spring-boot-starter-web-2.5.5.pom`）：
+
+```xml
+<dependencies>
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter</artifactId>
+        <version>2.5.5</version>
+        <scope>compile</scope>
+    </dependency>
+    
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-json</artifactId>
+        <version>2.5.5</version>
+        <scope>compile</scope>
+    </dependency>
+    
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-tomcat</artifactId>
+        <version>2.5.5</version>
+        <scope>compile</scope>
+    </dependency>
+    
+    <dependency>
+        <groupId>org.springframework</groupId>
+        <artifactId>spring-web</artifactId>
+        <version>5.3.10</version>
+        <scope>compile</scope>
+    </dependency>
+    
+    <dependency>
+        <groupId>org.springframework</groupId>
+        <artifactId>spring-webmvc</artifactId>
+        <version>5.3.10</version>
+        <scope>compile</scope>
+    </dependency>
+</dependencies>
+```
+
+`spring-boot-starter-web`这个starter中内部引入了webmvc、tomcat等相关依赖，因此能够直接使用Spring MVC相关的功能
+。
+
+## 配置文件
+
+Spring Boot为了能够适配每一个组件，都会提供一个starter，但是这些==启动器==的一
+些信息不能在内部写死，比如数据库的用户名、密码等。于是
+就统一写在了一个==Properties类==中，在Spring Boot启动的时候根据==前缀名+属性名称==从配置
+文件中读取，比如`WebMvcProperties`，其中定义了一些Spring Mvc相关的配置，前缀是`
+spring.mvc`：
+
+```java
+@ConfigurationProperties(prefix = "spring.mvc")
+public class WebMvcProperties {
+    ......
+}
+```
+
+![读取配置文件](SpringBootNotesPictures/读取配置文件.png)
+
+想要修改Spring Mvc相关的配置，只需要在application.properties文件中指定
+`spring.mvc.xxxx=xxxx`即可。
+
+## 启动类
+
+```java
+@SpringBootApplication
+public class FirstDemoApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(FirstDemoApplication.class, args);
+    }
+}
+```
+
+`@SpringBootApplication`是SpringBoot 核心注解，主要用于开启 Spring 自动配置：
+
+```java
+@Target({ElementType.TYPE})
+@Retention(RetentionPolicy.RUNTIME)
+@Documented
+@Inherited
+
+@SpringBootConfiguration
+@EnableAutoConfiguration
+
+@ComponentScan(
+    excludeFilters = {@Filter(
+    type = FilterType.CUSTOM,
+    classes = {TypeExcludeFilter.class}
+), @Filter(
+    type = FilterType.CUSTOM,
+    classes = {AutoConfigurationExcludeFilter.class}
+)}
+)
+public @interface SpringBootApplication {
+    ......
+}
+```
+
+`@SpringBootApplication`由`@SpringBootConfiguration`、`@EnableAutoConfiguration`、`@ComponentScan`三个注解组成。
+
+1.`@ComponentScan`是==包扫描==的注解，这个注解的作用
+就是<font color=red>在项目启动的时候扫描==启动类的同类级==以及==下级包==中的Bean</font>。
+
+2.`@SpringBootConfiguration`是`@Configuration`注解：
+
+```java
+@Target({ElementType.TYPE})
+@Retention(RetentionPolicy.RUNTIME)
+@Documented
+
+@Configuration
+
+@Indexed
+public @interface SpringBootConfiguration {
+    @AliasFor(
+        annotation = Configuration.class
+    )
+    boolean proxyBeanMethods() default true;
+}
+```
+
+@Configuration是Spring中的注解，表示该类是一个==配置类==，因此我们可以在启动类中做
+一些配置类可以做的事，比如注入一个Bean。
+
+3.`@EnableAutoConfiguration`开启自动配置：
+
+```java
+@Target({ElementType.TYPE})
+@Retention(RetentionPolicy.RUNTIME)
+@Documented
+@Inherited
+
+@AutoConfigurationPackage
+@Import({AutoConfigurationImportSelector.class})
+public @interface EnableAutoConfiguration {
+    String ENABLED_OVERRIDE_PROPERTY = "spring.boot.enableautoconfiguration";
+
+    Class<?>[] exclude() default {};
+
+    String[] excludeName() default {};
+}
+```
+
+@EnableAutoConfiguration这个注解的作用无非就是@Import的一种形
+式而已，<font color=red>在项目启动的时候向IOC容器中快速注入Bean</font>。
