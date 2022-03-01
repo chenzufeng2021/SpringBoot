@@ -247,7 +247,7 @@ public class Application {
 
 
 
-# JavaConfig
+# JavaConfig(Configuration+Bean)
 
 `@Component`系列注解虽说使用起来非常方便，但是<font color=red>bean的创建过程完全交给Spring容器来完成</font>，我们没办法自己控制。
 
@@ -293,6 +293,17 @@ Spring中使用比较多的Conditional还有：
 下面用一张图整体认识一下@Conditional家族:
 
 <img src="SpringBootNotesPictures/创建bean的方式-Conditional.webp" alt="图片" style="zoom:50%;" />
+
+## @Bean 注解详解<sup><a href="#ref2">[2]</a></sup>
+
+### 使用说明
+- @Bean 注解作用在方法上；
+- @Bean 指示一个方法返回一个 Spring 容器管理的 Bean
+- <font color=red>@Bean 方法名与返回类名一致，首字母小写</font>
+- @Bean 一般和 @Component 或者 @Configuration 一起使用
+- @Bean 注解默认作用域为单例 singleton 作用域，可通过 @Scope(“prototype”) 设置为原型作用域
+
+## @Configration 注解详解<span><a href="#ref2">[2]</a></span>
 
 # Import注解
 
@@ -765,3 +776,7 @@ Spring中bean的创建过程顺序大致如下：
 # 参考资料
 
 [1] [Spring中竟然有12种定义Bean的方法](https://mp.weixin.qq.com/s/YZT7NURQsNBSoSNsWBciQg)
+
+<span name="ref2">[2] [@Configuration、@Bean注解的使用详解（配置类的实现）](https://www.hangge.com/blog/cache/detail_2506.html)</span>
+
+https://www.cnblogs.com/cxuanBlog/p/11179439.html
