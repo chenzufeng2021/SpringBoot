@@ -4,12 +4,12 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.web.servlet.ServletComponentScan;
 
+@ServletComponentScan(basePackages = "com.example.filter")
 @SpringBootApplication
-// @ServletComponentScan(basePackages = "com.example.filter")
-public class MyFilterApplication {
+public class WebFilterApplication {
 
     public static void main(String[] args) {
-        SpringApplication.run(MyFilterApplication.class, args);
+        SpringApplication.run(WebFilterApplication.class, args);
     }
 
 }
