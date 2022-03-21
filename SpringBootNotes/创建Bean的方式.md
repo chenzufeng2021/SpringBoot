@@ -173,6 +173,8 @@ public class UserFactoryBean implements FactoryBean<User> {
 
 # Component注解
 
+通用的注解，可标注任意类为 Spring 的组件。<font color=red>如果一个 Bean 不知道属于哪个层，可以使用 `@Component` 注解标注</font>。
+
 为了解决bean太多时，xml文件过大，从而导致膨胀不好维护的问题。在Spring 2.5中开始支持：`@Component`、`@Repository`、`@Service`、`@Controller`等注解定义bean。从注解的源码可知，后三种注解也是`@Component`。
 
 `@Component`系列注解的出现，使得我们不需要像以前那样在bean.xml文件中配置bean了。现在只用<font color=red>在类上加Component、Repository、Service、Controller，这四种注解中的任意一种</font>，就能轻松完成==bean的定义==：
@@ -190,7 +192,7 @@ public class PersonService {
 
 - Controller 一般用在控制层；
 - Service 一般用在业务层；
-- Repository 一般用在数据层；
+- Repository 一般用在数据层，对应持久层即 Dao 层，主要用于数据库相关操作。；
 - Component 一般用在==公共组件==上。
 
 通过这种`@Component`扫描注解的方式定义bean的前提是：**需要先<font color=red>配置扫描路径</font>**。
@@ -304,6 +306,8 @@ Spring中使用比较多的Conditional还有：
 - @Bean 注解默认作用域为单例 singleton 作用域，可通过 @Scope(“prototype”) 设置为原型作用域
 
 ## @Configration 注解详解<span><a href="#ref2">[2]</a></span>
+
+`@Configuration` 表明在一个类里可以声明一个或多个 `@Bean` 方法，并且可以由 Spring 容器处理，以便在运行时为这些 bean 生成 bean 定义和服务请求
 
 # Import注解
 
@@ -773,6 +777,53 @@ Spring中bean的创建过程顺序大致如下：
 
 
 
+# 总结
+
+## @Component 和 @Bean 的区别
+
+1. 作用对象不同：`@Component` 注解作用于==类==，而 `@Bean` 注解作用于==方法==；
+2. `@Component` 通常是通过==路径扫描==来自动侦测以及自动装配到 Spring 容器中（我们可以使用 `@ComponentScan` 注解定义要扫描的路径，从中找出标识了需要装配的类自动装配到 Spring 的 bean 容器中)。`@Bean` 注解通常是我们在标有该注解的==方法中定义产生==这个 bean，`@Bean` 告诉了 Spring 这是某个类的实例，当我们需要用它的时候还给我。
+3. `@Bean` 注解比 `@Component` 注解的自定义性更强，而且很多地方我们只能通过 `@Bean` 注解来注册 bean。比如当我们引用第三方库中的类需要装配到 Spring 容器时，只能通过 `@Bean` 来实现。
+
+`@Bean` 注解使用示例：
+
+```java
+@Configuration
+public class AppConfig {
+    @Bean
+    public TransferService transferService() {
+        return new TransferServiceImpl();
+     }
+}
+```
+
+`@Component` 注解使用示例：
+
+```java
+@Component
+public class ServiceImpl implements AService {
+    ....
+}
+```
+
+下面这个例子是通过 @Component 无法实现：
+
+```java
+@Bean
+public OneService getService(status) {
+    case (status)  {
+        when 1:
+            return new serviceImpl1();
+        when 2:
+            return new serviceImpl2();
+        when 3:
+            return new serviceImpl3();
+    }
+}
+```
+
+
+
 # 参考资料
 
 [1] [Spring中竟然有12种定义Bean的方法](https://mp.weixin.qq.com/s/YZT7NURQsNBSoSNsWBciQg)
@@ -780,3 +831,6 @@ Spring中bean的创建过程顺序大致如下：
 <span name="ref2">[2] [@Configuration、@Bean注解的使用详解（配置类的实现）](https://www.hangge.com/blog/cache/detail_2506.html)</span>
 
 https://www.cnblogs.com/cxuanBlog/p/11179439.html
+
+https://blog.csdn.net/weixin_35544490/article/details/112143211
+
