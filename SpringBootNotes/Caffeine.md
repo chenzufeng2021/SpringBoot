@@ -83,6 +83,10 @@ Caffeine.newBuilder().weakKeys().weakValues().build();
     <artifactId>CaffineCache</artifactId>
     <version>1.0-SNAPSHOT</version>
 
+    <properties>
+        <java.version>1.8</java.version>
+    </properties>
+    
     <dependencies>
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -386,6 +390,10 @@ public class CaffeineApplication {
     <groupId>org.example</groupId>
     <artifactId>SpringCaffeineCache</artifactId>
     <version>1.0-SNAPSHOT</version>
+    
+    <properties>
+        <java.version>1.8</java.version>
+    </properties>
 
     <dependencies>
         <dependency>
@@ -427,6 +435,15 @@ public class CaffeineApplication {
             <version>2.0.9</version>
         </dependency>
     </dependencies>
+    
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
 
 </project>
 ```
