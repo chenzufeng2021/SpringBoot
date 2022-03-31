@@ -246,7 +246,210 @@ public class RedisApplicationTest {
 
 # SpringCache 整合 Redis[^3]
 
+## 实现步骤
 
+### config
+
+```java
+package com.example.config;
+
+import org.springframework.boot.autoconfigure.AutoConfigureAfter;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnSingleCandidate;
+import org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration;
+import org.springframework.cache.CacheManager;
+import org.springframework.cache.annotation.EnableCaching;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.data.redis.cache.RedisCacheConfiguration;
+import org.springframework.data.redis.cache.RedisCacheManager;
+import org.springframework.data.redis.connection.RedisConnectionFactory;
+import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
+import org.springframework.data.redis.serializer.RedisSerializationContext;
+import org.springframework.data.redis.serializer.StringRedisSerializer;
+
+import java.time.Duration;
+
+/**
+ * 缓存管理器：基于Lettuce操作redis的客户端
+ * @date 2022/3/31
+ */
+@Configuration
+@AutoConfigureAfter(RedisAutoConfiguration.class)
+@EnableCaching
+public class LettuceRedisConfig {
+    /**
+     * 缓存管理器
+     * @param redisConnectionFactory redisConnectionFactory
+     * @return cacheManager
+     */
+    @Bean
+    @ConditionalOnSingleCandidate(RedisConnectionFactory.class)
+    public CacheManager cacheManager(RedisConnectionFactory redisConnectionFactory) {
+        RedisCacheConfiguration cacheConfiguration = RedisCacheConfiguration.defaultCacheConfig();
+        RedisCacheConfiguration redisCacheConfiguration = cacheConfiguration
+                // 设置缓存管理器管理的缓存的默认过期时间(1小时)
+                .entryTtl(Duration.ofHours(1))
+                // 设置key为String序列化
+                .serializeKeysWith(RedisSerializationContext.SerializationPair.fromSerializer(new StringRedisSerializer()))
+                // 设置value为json序列化
+                .serializeValuesWith(RedisSerializationContext.SerializationPair.fromSerializer(new GenericJackson2JsonRedisSerializer()))
+                // 不缓存空值
+                .disableCachingNullValues();
+        // 构造一个Redis缓存管理器
+        return RedisCacheManager.builder(redisConnectionFactory)
+                // 缓存配置
+                .cacheDefaults(redisCacheConfiguration)
+                .build();
+    }
+
+    /**
+     * 自定义序列化模板
+     * @param lettuceConnectionFactory lettuceConnectionFactory
+     * @return redisTemplate
+     */
+    @Bean
+    @ConditionalOnSingleCandidate(LettuceConnectionFactory.class)
+    public RedisTemplate<String, String> redisTemplate(LettuceConnectionFactory lettuceConnectionFactory) {
+        // 创建一个模板类
+        RedisTemplate<String, String> redisTemplate = new RedisTemplate<>();
+        // 设置value的序列化规则和key的序列化规则
+        redisTemplate.setKeySerializer(new StringRedisSerializer());
+        redisTemplate.setValueSerializer(new GenericJackson2JsonRedisSerializer());
+        // redis连接工厂，储存到模板类中
+        redisTemplate.setConnectionFactory(lettuceConnectionFactory);
+        return redisTemplate;
+    }
+}
+```
+
+### 依赖
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>org.example</groupId>
+    <artifactId>SpringCacheRedis</artifactId>
+    <version>1.0-SNAPSHOT</version>
+
+    <parent>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <groupId>org.springframework.boot</groupId>
+        <version>2.3.7.RELEASE</version>
+    </parent>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-cache</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+        </dependency>
+
+        <!-- https://mvnrepository.com/artifact/io.swagger.core.v3/swagger-models -->
+        <dependency>
+            <groupId>io.springfox</groupId>
+            <artifactId>springfox-swagger2</artifactId>
+            <version>2.9.2</version>
+        </dependency>
+        <!-- https://mvnrepository.com/artifact/io.springfox/springfox-swagger-ui -->
+        <dependency>
+            <groupId>io.springfox</groupId>
+            <artifactId>springfox-swagger-ui</artifactId>
+            <version>2.9.2</version>
+        </dependency>
+        <!-- https://mvnrepository.com/artifact/com.github.xiaoymin/knife4j-spring-boot-starter -->
+        <dependency>
+            <groupId>com.github.xiaoymin</groupId>
+            <artifactId>knife4j-spring-boot-starter</artifactId>
+            <version>2.0.9</version>
+        </dependency>
+    </dependencies>
+
+</project>
+```
+
+### controller
+
+```java
+package com.example.controller;
+
+import com.example.service.UserService;
+import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiOperation;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+/**
+ * @date 2022/3/31
+ */
+@RestController
+@Api(tags = "SpringCacheRedis")
+public class UserController {
+    @Autowired
+    private UserService userService;
+
+    @ApiOperation("add")
+    @GetMapping("/addUserInfo")
+    public void addUserInfo(String id) {
+        System.out.println(userService.addUserInfo(id));
+    }
+
+    @ApiOperation("get")
+    @GetMapping("/getUserInfo")
+    public void getUserInfo(String id) {
+        System.out.println(userService.getUserInfo(id));
+    }
+}
+```
+
+### service
+
+```java
+package com.example.service;
+
+import org.springframework.cache.annotation.CachePut;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.stereotype.Service;
+
+/**
+ * @date 2022/3/31
+ */
+@Service
+public class UserService {
+
+    @CachePut(key = "#id", value = "userInfo")
+    public String addUserInfo(String id) {
+        System.out.println("addUserInfo没有走缓存");
+        return "addUserInfo";
+    }
+
+    @Cacheable(key = "#id", value = "userInfo")
+    public String getUserInfo(String id) {
+        System.out.println("getUserInfo没有走缓存");
+        return "getUserInfo";
+    }
+}
+```
 
 # 参考资料
 
