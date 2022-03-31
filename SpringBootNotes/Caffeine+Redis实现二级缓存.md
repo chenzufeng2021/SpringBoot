@@ -134,3 +134,12 @@ demo：https://github.com/yudiandemingzi/springboot-redis-caffeine-cache
 [^4]:[Spring Boot缓存实战 Redis + Caffeine 实现多级缓存—— xiaolyuh（重要）](https://www.jianshu.com/p/ef9042c068fd)
 
 [caffeine + redis自定义二级缓存](https://www.jianshu.com/p/d9358e7a6afc)
+
+[Redis+Caffeine两级缓存，让访问速度纵享丝滑](https://mp.weixin.qq.com/s/PsOkiH_L4VI_ogvjScWAMA)
+
+[基于Spring接口，集成Caffeine+Redis两级缓存](https://mp.weixin.qq.com/s/aYh9rL5uWsvT6sZqG5C7Dw)
+
+[缓存设计这些你了解吗SpringBoot 快速集成实现一级缓存Redis和二级缓存Caffeine 可自定义扩展](https://mp.weixin.qq.com/s/etWtO66wTeSJV7fVyFcUzg)
+
+[使用Redis实现Spring Cache两级缓存](https://mp.weixin.qq.com/s/vsJihLDYE5eYWJLZn44gjA)
+
