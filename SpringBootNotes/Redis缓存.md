@@ -451,6 +451,14 @@ public class UserService {
 }
 ```
 
+## 请求步骤[^5]
+
+请求进来，在方法上面扫描@Cacheable注解，那么会触发`org.springframework.cache.interceptor.CacheInterceptor`缓存的拦截器。
+
+然后会调用CacheManager的getCache方法，获取Cache，如果没有（第一次访问）就新建一Cache并返回。
+
+根据获取到的Cache去调用get方法获取缓存中的值。RedisCache这里有个bug，源码是先判断key是否存在，再去缓存获取值，在高并发下有bug。
+
 # 参考资料
 
 [^1]: [SpringBoot整合Redis，一篇解决缓存的所有问题_程序猿小亮的博客-CSDN博客](https://xiaoliang.blog.csdn.net/article/details/118677483)
@@ -460,6 +468,7 @@ public class UserService {
 [^2]: [SpringBoot整合Spring Cache，简化分布式缓存开发](https://blog.csdn.net/jiuqiyuliang/article/details/118794044)
 [^3]:[SpringBoot学习(七):集成Redis并结合Spring Cache使用 | 猿码记 (liuqh.icu)](http://liuqh.icu/2020/09/17/springboot-7-redis/)
 [^4]:[使用 Spring Cache + Redis 作为缓存 - 简书 (jianshu.com)](https://www.jianshu.com/p/931484bb3fdc)
+[^5]:[Spring Boot缓存实战 Redis 设置有效时间和自动刷新缓存，时间支持在配置文件中配置](https://www.jianshu.com/p/275cb42080d9)
 
 [优雅的缓存解决方案--SpringCache和Redis集成(SpringBoot) - 掘金 (juejin.cn)](https://juejin.cn/post/6844903807646711821)
 
