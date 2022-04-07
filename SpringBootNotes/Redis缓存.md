@@ -4,9 +4,9 @@ typora-copy-images-to: SpringBootNotesPictures
 
 # SpringBoot 整合 Redis[^1]
 
-## 实现步骤
+Spring Data Redis对Redis底层开发包（Jedis、Lettuce、JRedis、RJC）进行了高度封装，其中`lettuce`是Redis连接池未来的发展趋势，2.x开始已经**推荐使用**`lettuce`作为访问`redis`的client客户端。RedisTemplate封装提供了Redis各种操作、异常处理及序列化，完全屏蔽里底层实现（使用者面向Spring Data编程即可，可完全不用关心底层到底使用的是Jedis or Lettuce）[^7]。
 
-### 依赖
+## 依赖
 
 ```xml
 <dependency>
@@ -60,6 +60,10 @@ typora-copy-images-to: SpringBootNotesPictures
 </project>
 ```
 
+### RedisAutoConfiguration[^6]
+
+在SpringBoot中，已经自动帮我们在容器中生成了一个RedisTemplate和一个StringRedisTemplate。
+
 引入依赖后，可以查看 RedisAutoConfiguration 自动配置类：
 
 ```java
@@ -95,24 +99,22 @@ public class RedisAutoConfiguration {
 }
 ```
 
-### 添加配置
+从上面的源码中可以看出，开发时会存在2个问题：
 
-```properties
-spring.application.name=springboot-redis
+- RdisTemplate 的泛型是`<Object,Object>`，我们在进行缓存时写代码不是很方便，因为一般我们的key是String类型，所以我们需要一个`<String,Object>`的泛型。
 
-# Redis
-## 服务器地址
-spring.redis.host=localhost
-## 服务器连接端口
-spring.redis.port=6379
-## 数据库索引（默认为0）
-spring.redis.database=0
-spring.redis.client-type=lettuce
-```
+- RedisTemplate 没有设置数据存储在Redis时，Key和Value的序列化方式（采用默认的JDK序列化方式）。
+
+可以考虑采用下面的思路来解决上述两个问题：
+
+结合@ConditionalOnMissing注解，检查Spring容器中是否已经定义了id为redisTemplate的Bean，
+否则自动装配的RedisTemplate不会实例化。
+
+因此我们可以写一个配置类，配置Redisemplate对象，若未自定义RedisTemplate，默认会对key进行jdk序列化。
 
 
 
-### 自定义 RedisTemplate
+## 自定义 RedisTemplate
 
 默认情况下的模板只能支持 `RedisTemplate<String,String>`，只能存入字符串，很多时候，我们需要自定义 RedisTemplate ，==设置序列化器==，这样我们可以很方便的操作实例对象[^3]。
 
@@ -123,6 +125,14 @@ RedisTemplate 默认的序列化方式为 JdkSerializationRedisSerializer，会�
 Spring Data底层为我们实现了七种不同的序列化方式：
 
 ![RedisSerializer](SpringBootNotesPictures/RedisSerializer.png)
+
+对同一个数据进行序列化时，序列化操作前后的结果如下表所示[^6]：
+
+| 数据结构  | 序列化类                        | 序列化前   | 序列化后查看 |
+| --------- | ------------------------------- | ---------- | ------------ |
+| key/value | StringRedisSerializer           | test_value | test_value   |
+| key/value | Jackson2JsonRedisSerializer     | test_value | “test_value” |
+| key/value | JdkSerializationRedisSerializer | test_value | 乱码         |
 
 以Jackson2JsonRedisSerializer为例，展示如何切换序列化方式：
 
@@ -182,6 +192,54 @@ public class RedisConfig {
 }
 ```
 
+注：连接池配置可参考[使用Lettuce作为Client操作Redis示例]()[^7]实现：
+
+```java
+//@EnableCaching
+@Configuration
+public class CacheConfig extends CachingConfigurerSupport {
+
+    @Bean
+    public RedisConnectionFactory redisConnectionFactory() {
+        // RedisStandaloneConfiguration这个配置类是Spring Data Redis2.0后才有
+        RedisStandaloneConfiguration configuration = new RedisStandaloneConfiguration();
+        // 2.0后的写法
+        configuration.setHostName("10.102.132.150");
+        configuration.setPort(6379);
+        configuration.setDatabase(0);
+
+        LettuceConnectionFactory factory = new LettuceConnectionFactory(configuration);
+        return factory;
+    }
+
+    @Bean
+    public RedisTemplate<String, String> stringRedisTemplate() {
+        RedisTemplate<String, String> redisTemplate = new StringRedisTemplate();
+        redisTemplate.setConnectionFactory(redisConnectionFactory());
+        return redisTemplate;
+    }
+}
+```
+
+
+
+## 配置与启动类
+
+### 添加配置
+
+```properties
+spring.application.name=springboot-redis
+
+# Redis
+## 服务器地址
+spring.redis.host=localhost
+## 服务器连接端口
+spring.redis.port=6379
+## 数据库索引（默认为0）
+spring.redis.database=0
+spring.redis.client-type=lettuce
+```
+
 ### 启动类
 
 ```java
@@ -202,7 +260,7 @@ public class RedisApplication {
 }
 ```
 
-### 测试类
+## 测试类
 
 ```java
 package com.example;
@@ -252,22 +310,6 @@ public class RedisApplicationTest {
 
 ```java
 package com.example.config;
-
-import org.springframework.boot.autoconfigure.AutoConfigureAfter;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnSingleCandidate;
-import org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration;
-import org.springframework.cache.CacheManager;
-import org.springframework.cache.annotation.EnableCaching;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.data.redis.cache.RedisCacheConfiguration;
-import org.springframework.data.redis.cache.RedisCacheManager;
-import org.springframework.data.redis.connection.RedisConnectionFactory;
-import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
-import org.springframework.data.redis.core.RedisTemplate;
-import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
-import org.springframework.data.redis.serializer.RedisSerializationContext;
-import org.springframework.data.redis.serializer.StringRedisSerializer;
 
 import java.time.Duration;
 
@@ -459,18 +501,23 @@ public class UserService {
 
 根据获取到的Cache去调用get方法获取缓存中的值。RedisCache这里有个bug，源码是先判断key是否存在，再去缓存获取值，在高并发下有bug。
 
+## RedisCacheManager[^7]
+
+```java
+
+```
+
+
+
 # 参考资料
 
 [^1]: [SpringBoot整合Redis，一篇解决缓存的所有问题_程序猿小亮的博客-CSDN博客](https://xiaoliang.blog.csdn.net/article/details/118677483)
-
-[SpringBoot整合Redis做缓存，实战分享](https://blog.csdn.net/singwhatiwanna/article/details/107194161)
-
 [^2]: [SpringBoot整合Spring Cache，简化分布式缓存开发](https://blog.csdn.net/jiuqiyuliang/article/details/118794044)
 [^3]:[SpringBoot学习(七):集成Redis并结合Spring Cache使用 | 猿码记 (liuqh.icu)](http://liuqh.icu/2020/09/17/springboot-7-redis/)
 [^4]:[使用 Spring Cache + Redis 作为缓存 - 简书 (jianshu.com)](https://www.jianshu.com/p/931484bb3fdc)
 [^5]:[Spring Boot缓存实战 Redis 设置有效时间和自动刷新缓存，时间支持在配置文件中配置](https://www.jianshu.com/p/275cb42080d9)
+[^6]:[SpringBoot2.x系列教程之中利用Redis实现缓存功能详细教程](https://blog.csdn.net/GUDUzhongliang/article/details/122053095)
+[^7]:[玩转Spring Cache --- 整合分布式缓存Redis Cache（使用Lettuce、使用Spring Data Redis）](https://fangshixiang.blog.csdn.net/article/details/95047822)(重要)
 
-[优雅的缓存解决方案--SpringCache和Redis集成(SpringBoot) - 掘金 (juejin.cn)](https://juejin.cn/post/6844903807646711821)
-
-https://cloud.tencent.com/developer/article/1497594
+[SpringBoot实现Redis缓存（SpringCache+Redis的整合）](https://blog.csdn.net/user2025/article/details/106595257)
 

@@ -49,7 +49,7 @@ Caffeine有三种缓存值的清理策略：`基于大小`、`基于时间`和`�
 
 `基于引用`：启用基于缓存键值的垃圾回收。
 
-- Java种有四种引用：强引用，软引用，弱引用和虚引用，caffeine可以将值封装成弱引用或软引用。
+- Java有四种引用：强引用，软引用，弱引用和虚引用，caffeine可以将值封装成弱引用或软引用。
 - 软引用：如果一个对象只具有软引用，则内存空间足够，垃圾回收器就不会回收它；如果内存空间不足了，就会回收这些对象的内存。
 - 弱引用：在垃圾回收器线程扫描它所管辖的内存区域的过程中，一旦发现了只具有弱引用的对象，不管当前内存空间足够与否，都会回收它的内存。
 
@@ -184,6 +184,7 @@ import java.util.concurrent.TimeUnit;
 public class CaffeineCacheConfig {
     @Bean
     public Cache<String, Object> caffeineCache() {
+        // 对Caffeine缓存特性进行设置
         return Caffeine.newBuilder()
                 // 设置最后一次写入或访问后经过固定时间过期
                 .expireAfterWrite(60, TimeUnit.SECONDS)
@@ -495,10 +496,12 @@ import org.springframework.context.annotation.Configuration;
 import java.util.concurrent.TimeUnit;
 
 @Configuration
+// @EnableCaching 注解用于开启 Springboot 的缓存功能，可以放在此处，也可以放在 application 启动类的头上。
 public class CaffeineCacheConfig {
     @Bean("caffeineCacheManager")
     public CacheManager caffeineCacheManager() {
         CaffeineCacheManager caffeineCacheManager = new CaffeineCacheManager();
+        // 【定制化缓存Cache
         caffeineCacheManager.setCaffeine(Caffeine.newBuilder()
                 // 设置最后一次写入或访问后经过固定时间过期
                 .expireAfterAccess(60, TimeUnit.SECONDS)
@@ -674,6 +677,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.cache.annotation.EnableCaching;
 
 @SpringBootApplication
+// 开启缓存，需要显示的指定
 @EnableCaching
 public class SpringCacheCaffeineApplication {
     public static void main(String[] args) {
@@ -684,15 +688,77 @@ public class SpringCacheCaffeineApplication {
 
 
 
+## CaffeineCacheManager[^2]
+
+在 Springboot 中<font color=red>使用 CaffeineCacheManager 管理器管理 Caffeine 类型的缓存，Caffeine 类似 Cache 缓存的工厂， 可以生产很多个 Cache 实例，Caffeine 可以设置各种缓存属性，这些 Cache 实例都共享 Caffeine 的缓存属性</font>[^3]。
+
+`spring-context-support`提供的`CaffeineCacheManager`实现：
+
+```java
+package org.springframework.cache.caffeine;
+
+public class CaffeineCacheManager implements CacheManager {
+    // Caffeine 的各种属性都使用默认的属性，因为 Caffeine.newBuilder() 没有给 Caffeine 设置任何属性
+    // 可通过setCaffeine来自定这个cacheBuilder
+    private Caffeine<Object, Object> cacheBuilder = Caffeine.newBuilder();
+    @Nullable
+    private CacheLoader<Object, Object> cacheLoader;
+    private boolean allowNullValues = true;
+    // 默认能动态生成Cache：当根据名字来获取某个缓存时，如果缓存不存在，那么是否自动创建一个缓存
+    private boolean dynamic = true;
+    // 保存各个缓存 Cache，key 是缓存的名字，value 就是对应的缓存对象
+    private final Map<String, Cache> cacheMap = new ConcurrentHashMap(16);
+    private final Collection<String> customCacheNames = new CopyOnWriteArrayList();
+
+    public CaffeineCacheManager() {
+    }
+
+    public CaffeineCacheManager(String... cacheNames) {
+        this.setCacheNames(Arrays.asList(cacheNames));
+    }
+
+    ......
+
+    @Nullable
+    public Cache getCache(String name) {
+        return (Cache)this.cacheMap.computeIfAbsent(name, (cacheName) -> {
+            return this.dynamic ? this.createCaffeineCache(cacheName) : null;
+        });
+    }
+
+    ......
+
+    // CaffeineCache实现了org.springframework.cache.Cache接口
+    // 内部实现都是委托给com.github.benmanes.caffeine.cache.Cache<Object, Object>来做
+    protected Cache adaptCaffeineCache(String name, com.github.benmanes.caffeine.cache.Cache<Object, Object> cache) {
+        return new CaffeineCache(name, cache, this.isAllowNullValues());
+    }
+
+    protected Cache createCaffeineCache(String name) {
+        return this.adaptCaffeineCache(name, this.createNativeCaffeineCache(name));
+    }
+......
+}
+```
+
 
 
 # 参考资料
 
 [SpringBoot 使用 Caffeine 本地缓存](http://www.mydlq.club/article/56/)
 
+[^2]:[玩转Spring Cache --- 整合进程缓存之王Caffeine Cache](https://fangshixiang.blog.csdn.net/article/details/94982916)
+[^3]:[Springboot Caffeine 详解（一篇就明白）](https://blog.csdn.net/dgh112233/article/details/119009366)
+
+
+
+[Caffeine高性能设计剖析](https://albenw.github.io/posts/a4ae1aa2/)
+
+[Caffeine本地缓存详解](https://blog.csdn.net/w727655308/article/details/121623776)
+
+[Caffeine本地缓存详解（一篇就明白）](https://blog.csdn.net/dgh112233/article/details/118915259)：属性
+
 [Caffeine Cache-高性能Java本地缓存组件](https://www.cnblogs.com/rickiyang/p/11074158.html)：原理
-
-
 
 Caffeine 详解 —— Caffeine 使用：https://zhuanlan.zhihu.com/p/329684099——参数
 
