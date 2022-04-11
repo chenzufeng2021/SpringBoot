@@ -2,7 +2,13 @@
 typora-copy-images-to: SpringBootNotesPictures
 ---
 
-# SpringCache 介绍[^1]
+# SpringCache[^1]
+
+SpringCache 是 SpringFramework 3.1 引入的新特性，提供了基于==注解==的缓存配置方法。它本质上<font color=red>不是一个具体的缓存实现方案</font>（例如EHCache），而是一个<font color=red>对缓存使用的抽象</font>。通过在已有代码中打上几个预定义的注释，就可以实现我们希望达到的缓存效果。
+
+SpringCache 支持和第三方缓存例如EHCache集成；另外也提供了开箱即用的默认实现，可以直接拿来使用。
+
+SpringCache 支持使用 SpEL（Spring Expression Language）来定义缓存的 key 和各种 condition，因此具备相当的灵活性，并可以支持非常复杂的语义。[^6]
 
 ## 硬编码使用缓存[^4]
 
@@ -75,9 +81,9 @@ public User getUserById(Long userId) {
 
 这种实现方式完全和缓存分离开来，如果开发联调阶段，需要去掉缓存那么直接注释掉注解就好了！
 
-这一整套实现都不要自己手动写，Spring Cache就已经定义好相关注解和接口，我们可以轻易实现上面的功能。
+这一整套实现都不要自己手动写，Spring Cache 就已经定义好相关注解和接口，我们可以轻易实现上面的功能。
 
-## Spring Cache简介
+## Spring Cache 简介
 
 Spring Cache 不是一个具体的缓存实现方案，而是一个对缓存使用的抽象(**Cache Abstraction**)：
 
@@ -95,154 +101,6 @@ Spring Cache 不是一个具体的缓存实现方案，而是一个对缓存使�
 | serialize      | 缓存数据时value序列化策略                                    |
 
 Spring Cache是Spring-context包中提供的基于注解方式使用的缓存组件，定义了一些标准接口，通过实现这些接口，就可以通过在方法上增加注解来实现缓存。这样就能够避免缓存代码与业务处理耦合在一起的问题。
-
-## Spring Cache核心接口
-
-Spring Cache核心的接口就两个：`Cache`和`CacheManager`[^4]
-
-### Cache接口
-
-除了RedisCache是在`spring-data-redis`包中，其他的基本都是在`spring-context-support`包中。
-
-该接口定义提供缓存的具体操作，比如缓存的放入、读取、清理：
-
-```java
-package org.springframework.cache;
-
-import java.util.concurrent.Callable;
-import org.springframework.lang.Nullable;
-
-/**
- * Interface that defines common cache operations.
- */
-public interface Cache {
-
-	/**
-	 * Return the cache name.
-	 * cacheName，缓存的名字，默认实现中一般是CacheManager创建Cache的bean时传入cacheName
-	 */
-	String getName();
-
-	/**
-	 * Return the underlying native cache provider.
-	 * 得到底层使用的缓存，如Ehcache
-	 */
-	Object getNativeCache();
-
-	/**
-	 * Return the value to which this cache maps the specified key.
-	 * 通过key获取缓存值，返回的是ValueWrapper，
-	 * 为了兼容存储空值的情况，将返回值包装了一层，通过get方法获取实际值
-	 */
-	@Nullable
-	ValueWrapper get(Object key);
-
-	/**
-	 * Return the value to which this cache maps the specified key,
-	 * generically specifying a type that return value will be cast to.
-	 * 通过key获取缓存值，返回的是实际值，即方法的返回值类型
-	 */
-	@Nullable
-	<T> T get(Object key, @Nullable Class<T> type);
-
-	/**
-	 * 通过key获取缓存值，可以使用valueLoader.call()来调使用@Cacheable注解的方法。
-	 * 当@Cacheable注解的sync属性配置为true时使用此方法。
-	 * 因此方法内需要保证回源到数据库的同步性。避免在缓存失效时大量请求回源到数据库。
-	 */
-	@Nullable
-	<T> T get(Object key, Callable<T> valueLoader);
-
-	/**
-	 * Associate the specified value with the specified key in this cache.
-	 * 将@Cacheable注解方法返回的数据放入缓存中
-	 */
-	void put(Object key, @Nullable Object value);
-
-	/**
-	 * 当缓存中不存在key时才放入缓存。返回值是当key存在时原有的数据
-	 */
-	@Nullable
-	default ValueWrapper putIfAbsent(Object key, @Nullable Object value) {
-		ValueWrapper existingValue = get(key);
-		if (existingValue == null) {
-			put(key, value);
-		}
-		return existingValue;
-	}
-
-	/**
-	 * Evict the mapping for this key from this cache if it is present.
-	 * 删除缓存
-	 */
-	void evict(Object key);
-
-	/**
-	 * Evict the mapping for this key from this cache if it is present
-	 */
-	default boolean evictIfPresent(Object key) {
-		evict(key);
-		return false;
-	}
-
-	/**
-	 * 清空缓存
-	 */
-	void clear();
-
-	/**
-	 * Invalidate the cache through removing all mappings, expecting all
-	 * entries to be immediately invisible for subsequent lookups.
-	 */
-	default boolean invalidate() {
-		clear();
-		return false;
-	}
-
-
-	/**
-	 * A (wrapper) object representing a cache value.
-	 * 缓存返回值的包装
-	 */
-	@FunctionalInterface
-	interface ValueWrapper {
-		/**
-		 * Return the actual value in the cache.
-		 */
-		@Nullable
-		Object get();
-	}
-}
-```
-
-### CacheManager接口
-
-主要提供Cache实现bean的创建，每个应用里可以通过cacheName来对Cache进行隔离，每个cacheName对应一个Cache实现。
-
-```java
-package org.springframework.cache;
-
-import java.util.Collection;
-import org.springframework.lang.Nullable;
-
-public interface CacheManager {
-
-	/**
-	 * 通过cacheName创建Cache的实现bean，具体实现中需要存储已创建的Cache实现bean，避免重复创建，
-	 * 也避免内存缓存对象（如Caffeine）重新创建后原来缓存内容丢失的情况
-	 */
-	@Nullable
-	Cache getCache(String name);
-
-	/**
-	 * 返回所有的cacheName
-	 */
-	Collection<String> getCacheNames();
-
-}
-```
-
-
 
 ## Spring AOP
 
@@ -333,6 +191,27 @@ spring.cache.type=caffeine
 
 
 # 注解[^2]
+
+## @EnableCaching
+
+作用：标注在 Configuration 类上，用于启用 Cache 注解：
+
+```java
+@Target(ElementType.TYPE)
+@Retention(RetentionPolicy.RUNTIME)
+@Documented
+@Import(CachingConfigurationSelector.class)
+public @interface EnableCaching {
+    // 动态代理模式中，Spring AOP 对于具体类的代理是使用 JavaProxy 还是 Cglib
+    boolean proxyTargetClass() default false;
+    // Spring AOP 使用动态代理，还是原生 ASPECTJ 来实现
+    AdviceMode mode() default AdviceMode.PROXY;
+    // 启动顺序
+    int order() default Ordered.LOWEST_PRECEDENCE;
+}
+```
+
+
 
 ## @Cacheable
 
@@ -600,6 +479,21 @@ public User getUserById(Long userId) {......}
 @CachePut 也可以声明一个方法支持缓存功能，<font color=red>使用 @CachePut 标注的方法在执行前不会去检查缓存中是否存在之前执行过的结果，而是==每次都会执行该方法==，并将执行结果以键值对的形式存入指定的缓存中</font>。
 
 ```java
+public @interface CachePut {    
+    // 缓存的名字，可以把数据写到多个缓存
+    String[] value();                  
+    // 缓存key，如果不指定将使用默认的KeyGenerator生成
+    String key() default "";      
+    // 满足缓存条件的数据才会放入缓存，CachePut的condition只在调用方法之后判断，因此可以得到result
+    String condition() default "";    
+    // 用于否决缓存更新的，不像condition，该表达只在方法执行之后判断，此时可以拿到返回值result进行判断了
+    String unless() default "";        
+}
+```
+
+使用示例：
+
+```java
 // 每次都会执行方法，并将结果存入指定的缓存中
 @CachePut("users")
 public User find(Integer id) {
@@ -704,6 +598,370 @@ public User find(Integer id) {
 }
 ```
 
+
+
+# 使用样例
+
+## 配置 CacheManager 与 Cache
+
+由于是 SpringFramework 的内置功能，使用 SpringCache 并不需要额外引入jar包。并且只需要简单的配置，就可以启用==开箱即用的默认缓存==实现。
+
+创建 `Configuration` 类，在其中配置 `CacheManager Bean`，并为其创建两个 cache（注意cache的名称，在下面需要缓存的方法上打注释配置时需要指定）：
+
+```java
+@Configuration
+@EnableCaching(proxyTargetClass = true)
+public class Configuration{
+	@Bean(name="simpleCacheManager")
+	public CacheManager simpleCacheManager(){
+		SimpleCacheManager cacheManager = new SimpleCacheManager();
+		List<Cache> caches = new ArrayList<Cache>();
+		ConcurrentMapCache cache1 = new ConcurrentMapCache("mycache");
+		ConcurrentMapCache cache2 = new ConcurrentMapCache("mycache2");
+		caches.add(cache1);
+		caches.add(cache2);
+		cacheManager.setCaches(caches);
+		return cacheManager;
+	}
+}
+```
+
+Configuration 类上的`@EnableCaching(proxyTargetClass = true)`注释表示==启动SpringCache功能==。
+
+```java
+package org.springframework.cache.annotation;
+
+@Target({ElementType.TYPE})
+@Retention(RetentionPolicy.RUNTIME)
+@Documented
+@Import({CachingConfigurationSelector.class})
+public @interface EnableCaching {
+    boolean proxyTargetClass() default false;
+
+    AdviceMode mode() default AdviceMode.PROXY;
+
+    int order() default 2147483647;
+}
+```
+
+其中`proxyTargetClass`表示：当需要代理的类是一个==接口==或者是一个==动态生成的代理类==时使用`JdkProxy`代理；而当要代理的类是一个==具体类==时，使用`cglib`来代理。
+
+假如不设置该属性，则默认使用`JdkProxy`代理，而<font color=red>`JdkProxy`能够代理的类必须实现接口</font>，因此如果想要一个没实现接口的类被代理，就必须设置`proxyTargetClass = true`来使用`cglib`完成代理。
+
+`@EnableCaching` 还有一个属性`AdviceMode mode`，取值有两个`AdviceMode.PROXY`和`AdviceMode.ASPECTJ`，意思是 Spring AOP 使用==代理模式==实现，还是使用==原生 AspectJ 模式==实现，默认是代理模式。
+
+
+
+`SimpleCacheManager`与`ConcurrentMapCache`都是 SpringCache 提供的默认实现。而当我们使用 SpringBoot 时，<font color=red>由于其 `spring-boot-autoconfigure` 模块里对 SpringCache 做了默认的自动配置，因此我们甚至连 CacheManager 都不需要配置。仅仅在 Configuration 类上打上`@EnableCaching(proxyTargetClass = true)`注释便可以启动 Springcache 了</font>。
+
+
+
+## 使用注释
+
+光是启用 SpringCache 并没有用，我们还<font color=red>需要指明在哪些类的哪些方法上需要缓存，以及需要什么样的缓存行为</font>。
+
+SpringCache 提供了`@Cacheable、@CachePut、@CacheEvict`等注释，并支持使用SpEL（Spring Expression Language）来定义缓存的 key 和各种 condition，因此具备相当的灵活性，并可以支持非常复杂的语义。
+
+```java
+@Service
+public class UserService {
+	@CacheEvict(value={"mycache", "mycache2"}, allEntries = true)
+	public void clearCache(){
+		
+	}
+	
+	@CachePut(value = "mycache", key = "#user.id")    
+	public User save(User user) {    
+	    return user;    
+	}
+	
+	@Cacheable(value="mycache2", key = "#username.concat(#email)", condition = "#username eq 'wangd'")
+	public User findByUsernameAndEmail(String username, String email){
+		Random random = new Random();
+        User user = new User(System.currentTimeMillis() + random.nextInt(10000), username, email);
+        return user;
+	}
+
+}
+```
+
+
+
+## 自定义 CacheManager 和 Cache
+
+SpringCache 本质上是一个==对缓存使用的抽象==，将存储的具体实现方案，从缓存执行动作及流程中提取出来。
+
+缓存流程中面向的两个抽象接口是`CacheManager、Cache`。其中 Cache 提供了缓存操作的读取、写入、移除等方法，<font color=red>本着面向抽象编程的原则，内部将缓存对象统一封装成`ValueWrapper`</font>。
+
+### Cache 接口
+
+Cache 接口代码如下：
+
+```java
+package org.springframework.cache;
+
+import java.util.concurrent.Callable;
+import org.springframework.lang.Nullable;
+
+/**
+ * Interface that defines common cache operations.
+ */
+public interface Cache {
+
+	/**
+	 * Return the cache name.
+	 * cacheName，缓存的名字，默认实现中一般是CacheManager创建Cache的bean时传入cacheName
+	 */
+	String getName();
+
+	/**
+	 * Return the underlying native cache provider.
+	 * 得到底层使用的缓存，如Ehcache
+	 */
+	Object getNativeCache();
+
+	/**
+	 * Return the value to which this cache maps the specified key.
+	 * 通过key获取缓存值，返回的是ValueWrapper，
+	 * 为了兼容存储空值的情况，将返回值包装了一层，通过get方法获取实际值
+	 */
+	@Nullable
+	ValueWrapper get(Object key);
+
+	/**
+	 * Return the value to which this cache maps the specified key,
+	 * generically specifying a type that return value will be cast to.
+	 * 通过key获取缓存值，返回的是实际值，即方法的返回值类型
+	 */
+	@Nullable
+	<T> T get(Object key, @Nullable Class<T> type);
+
+	/**
+	 * 通过key获取缓存值，可以使用valueLoader.call()来调使用@Cacheable注解的方法。
+	 * 当@Cacheable注解的sync属性配置为true时使用此方法。
+	 * 因此方法内需要保证回源到数据库的同步性。避免在缓存失效时大量请求回源到数据库。
+	 */
+	@Nullable
+	<T> T get(Object key, Callable<T> valueLoader);
+
+	/**
+	 * Associate the specified value with the specified key in this cache.
+	 * 将@Cacheable注解方法返回的数据放入缓存中
+	 */
+	void put(Object key, @Nullable Object value);
+
+	/**
+	 * 当缓存中不存在key时才放入缓存。返回值是当key存在时原有的数据
+	 */
+	@Nullable
+	default ValueWrapper putIfAbsent(Object key, @Nullable Object value) {
+		ValueWrapper existingValue = get(key);
+		if (existingValue == null) {
+			put(key, value);
+		}
+		return existingValue;
+	}
+
+	/**
+	 * Evict the mapping for this key from this cache if it is present.
+	 * 删除缓存
+	 */
+	void evict(Object key);
+
+	/**
+	 * Evict the mapping for this key from this cache if it is present
+	 */
+	default boolean evictIfPresent(Object key) {
+		evict(key);
+		return false;
+	}
+
+	/**
+	 * 清空缓存
+	 */
+	void clear();
+
+	/**
+	 * Invalidate the cache through removing all mappings, expecting all
+	 * entries to be immediately invisible for subsequent lookups.
+	 */
+	default boolean invalidate() {
+		clear();
+		return false;
+	}
+
+
+	/**
+	 * A (wrapper) object representing a cache value.
+	 * 缓存返回值的包装
+	 */
+	@FunctionalInterface
+	interface ValueWrapper {
+		/**
+		 * Return the actual value in the cache.
+		 */
+		@Nullable
+		Object get();
+	}
+}
+```
+
+### CacheManager 接口
+
+由于在应用中可能==定义多个Cache==，因此提供了 CacheManager 抽象，<font color=red>用于缓存的管理</font>，主要提供 Cache 实现 bean 的创建，每个应用里可以通过 cacheName 来对 Cache 进行隔离，每个 cacheName 对应一个 Cache 实现。接口代码如下：
+
+```java
+package org.springframework.cache;
+
+import java.util.Collection;
+import org.springframework.lang.Nullable;
+
+public interface CacheManager {
+
+	/**
+	 * 通过cacheName创建Cache的实现bean，具体实现中需要存储已创建的Cache实现bean，避免重复创建，
+	 * 也避免内存缓存对象（如Caffeine）重新创建后原来缓存内容丢失的情况
+	 */
+	@Nullable
+	Cache getCache(String name);
+
+	/**
+	 * 返回所有的cacheName
+	 */
+	Collection<String> getCacheNames();
+
+}
+```
+
+### 自定义缓存实现
+
+任何实现了这两个接口的缓存方案，都可以直接配置进 SpringCache 使用。其自带的`SimpleCacheManager、ConcurrentMapCache`是如此；使用 ehcache 作为存储实现的`EhCacheCacheManager、EhCacheCache`也是如此。我们可以自己实现 CacheManager 与 Cache，并将其集成进来。
+
+为了方便展示，我们自定义缓存实现方案只实现最简单的功能，cache 内部使用 ConcurrentHashMap 做为存储方案，使用默认实现 SimpleValueWrapper。
+
+MyCache 代码如下：
+
+```java
+public class MyCache implements Cache {
+	final static Logger logger = LoggerFactory.getLogger(MyCache.class);
+	
+	String name;
+	Map<Object, Object> store = new ConcurrentHashMap<Object, Object>();
+	
+    public MyCache() { 
+    } 
+	  
+    public MyCache(String name) { 
+        this.name = name; 
+    } 
+    
+	@Override
+	public String getName() {
+		return this.name;
+	}
+	public void setName(String name){
+		this.name = name;
+	}
+ 
+	@Override
+	public Object getNativeCache() {
+		return store;
+	}
+ 
+	@Override
+	public ValueWrapper get(Object key) {
+		ValueWrapper result = null; 
+	    Object thevalue = store.get(key); 
+	    if(thevalue!=null) { 
+	    	logger.info("["+name+"]got cache, key:"+key);
+	      result = new SimpleValueWrapper(thevalue); 
+	    }else{
+	    	logger.info("["+name+"]missing cache, key:"+key);
+	    }
+	    return result;
+	}
+ 
+	@SuppressWarnings("unchecked")
+	@Override
+	public <T> T get(Object key, Class<T> type) {
+		ValueWrapper vw = get(key);
+		if(vw==null){
+			return null;
+		}
+		return (T)vw.get();
+	}
+ 
+	@SuppressWarnings("unchecked")
+	@Override
+	public <T> T get(Object key, Callable<T> valueLoader) {
+		ValueWrapper vw = get(key);
+		if(vw==null){
+			return null;
+		}
+		return (T)vw.get();
+	}
+ 
+	@Override
+	public void put(Object key, Object value) {
+		store.put(key, value);
+	}
+ 
+	@Override
+	public ValueWrapper putIfAbsent(Object key, Object value) {
+		Object existing = this.store.putIfAbsent(key, value);
+		return (existing != null ? new SimpleValueWrapper(existing) : null);
+	}
+ 
+	@Override
+	public void evict(Object key) {
+		store.remove(key);
+	}
+ 
+	@Override
+	public void clear() {
+		store.clear();
+	}
+}
+```
+
+MyCacheManager：
+
+```java
+public class MyCacheManager extends AbstractCacheManager {
+	private Collection<? extends MyCache> caches; 
+	  
+	  /** 
+	  * Specify the collection of Cache instances to use for this CacheManager. 
+	  */ 
+	  public void setCaches(Collection<? extends MyCache> caches) { 
+	    this.caches = caches; 
+	  } 
+	 
+	  @Override 
+	  protected Collection<? extends MyCache> loadCaches() { 
+	    return this.caches; 
+	  } 
+}
+```
+
+接下来在 Configuration 中配置我们自己定制的 Cache 实现方案：
+
+```java
+@Bean(name="myCacheManager")
+public CacheManager myCacheManager(){
+    MyCacheManager myCacheManager = new MyCacheManager();
+    List<MyCache> caches = new ArrayList<MyCache>();
+    MyCache mycache = new MyCache("mycache");
+    MyCache mycache2 = new MyCache("mycache2");
+    caches.add(mycache);
+    caches.add(mycache2);
+    myCacheManager.setCaches(caches);
+    return myCacheManager;
+}
+```
+
+
+
 # 参考资料
 
 [^1]:[品味Spring Cache设计之美](https://mp.weixin.qq.com/s/o8RvO14LEzHCB7R44LLZmw)
@@ -711,9 +969,11 @@ public User find(Integer id) {
 [^3]: [SpringBoot如何集成Caffeine](https://segmentfault.com/a/1190000040912996)
 [^4]:[基于Spring Cache实现分布式二级缓存](https://mp.weixin.qq.com/s/2hoDTGd07NtjG5Vanq5wYw)
 [^5]:[实战 Spring Cache](https://mp.weixin.qq.com/s/Jab1erOqAVVuYli8sR_RjA)
+[^6]:[SpringCache实现原理及核心业务逻辑（一）_不动明王1984的博客-CSDN博客_springcache](https://blog.csdn.net/m0_37962779/article/details/78671468)
 
 [SpringBoot基础系列-SpringCache使用](https://www.jianshu.com/p/6db623355e11)
 
 [Spring Boot缓存实战 Redis + Caffeine 实现多级缓存_xiaolyuh123的博客-CSDN博客](https://blog.csdn.net/xiaolyuh123/article/details/78866184)
 
 [缓存使用的思考：Spring Cache Vs Caffeine](https://juejin.cn/post/6844904016615309326)
+
