@@ -1,10 +1,179 @@
 ---
 typora-copy-images-to: SpringBootNotesPictures
+
 ---
 
-# SpringCache 实现原理
+# SpringCache 实现原理[^4]
 
-SpringCache 使用 Spring AOP 来实现，当我们在 Configuration 类打上 @EnableCaching 注释时，该标注通过 `ImportSelector` 机制启动 `AbstractAdvisorAutoProxyCreator` 的一个实例，该实例本身是一个 Ordered BeanPostProcessor，<font color=red>BeanPostProcessor 的作用是在 bean 创建、初始化的前后对其进行一些额外的操作（包括创建代理）</font>。而Spring AOP就是通过AbstractAdvisorAutoProxyCreator来实现的。因此可以认为当在 Configuration 类打上 @EnableCaching 注释时，做的第一件事情就是启用 Spring AOP 机制。
+## 基本概念
+
+核心类：
+
+- CacheManager：缓存管理器，获取缓存的接口。
+- Cache：缓存操作抽象接口，抽象实现类为 AbstractValueAdaptingCache。
+
+配置类：
+
+- CachingConfigurerSupport：缓存配置支持类，需要使用 Spring Cache 的项目继承，一个项目只能有一个相关 bean。
+- AbstractCachingConfiguration：抽象缓存配置，用于==初始化配置==。加载 cacheManager、 cacheResolver、 keyGenerator
+- ProxyCachingConfiguration：继承 AbstractCachingConfiguration，默认的==缓存代理配置==，用来==配置拦截器==。
+
+拦截器：
+
+- BeanFactoryCacheOperationSourceAdvisor：缓存切面，重写拦截器时不需要修改；
+- CacheInterceptor：缓存拦截器，继承 CacheAspectSupport。重写拦截器时可以继承。
+- CacheAspectSupport：缓存拦截核心实现，缓存拦截器都需要继承
+
+
+
+## 基本原理
+
+1、项目继承 CachingConfigurerSupport，进行==缓存配置==，一个项目只能有一个缓存配置类。项目启动时自动加载。
+
+2、ProxyCachingConfiguration 代理缓存配置类进行缓存拦截器注册，项目启动时自动加载。
+
+3、<font color=red>方法执行的时候，缓存拦截器会拦截带有缓存注解（cacheable、cacheput、cacheEvit）的方法，进入 CacheAspectSupport 的 execute 方法中</font>。
+
+4、CacheAspectSupport 的 execute 的主逻辑：前置删除缓存操作$\longrightarrow$查询缓存$\longrightarrow$(如果查询不到缓存执行方法)$\longrightarrow$添加缓存$\longrightarrow$后置删除缓存操作。每次都会按照这个流程走，在具体的方法里面会判断当前操作是否被执行。比如 @cacheable 注解的时候调用删除缓存操作方法就不会有任何执行。
+
+5、如果缓存操作(get/put/evict)失败就会调用 CacheErrorHandler 的相应方法。如果没有 CacheErrorHandler，默认使用 SimpleCacheErrorHandler。
+
+
+
+
+
+
+
+# 开启缓存[^2]
+
+SpringCache 使用 Spring AOP 来实现，当我们在 Configuration 类打上 @EnableCaching 注释时，该标注通过 `ImportSelector` 机制启动 `AbstractAdvisorAutoProxyCreator` 的一个实例，该实例本身是一个 Ordered BeanPostProcessor，<font color=red>BeanPostProcessor 的作用是在 bean 创建、初始化的前后对其进行一些额外的操作（包括创建代理）</font>。因此可以认为当在 Configuration 类打上 @EnableCaching 注释时，做的第一件事情就是启用 Spring AOP 机制。
+
+```java
+@Target({ElementType.TYPE})
+@Retention(RetentionPolicy.RUNTIME)
+@Documented
+@Import({CachingConfigurationSelector.class})
+public @interface EnableCaching {
+    // 是否直接代理目标类
+    boolean proxyTargetClass() default false;
+	// 通知模式，默认是代理
+    AdviceMode mode() default AdviceMode.PROXY;
+	// 顺序
+    int order() default 2147483647;
+}
+```
+
+这个注解和@EnableAsync注解特别像，说明都是基于==Aop和代理==做了能力增强，该类导入了 `CachingConfigurationSelector` 类：
+
+```java
+public class CachingConfigurationSelector extends AdviceModeImportSelector<EnableCaching> {
+    private static final String PROXY_JCACHE_CONFIGURATION_CLASS = "org.springframework.cache.jcache.config.ProxyJCacheConfiguration";
+    private static final String CACHE_ASPECT_CONFIGURATION_CLASS_NAME = "org.springframework.cache.aspectj.AspectJCachingConfiguration";
+    private static final String JCACHE_ASPECT_CONFIGURATION_CLASS_NAME = "org.springframework.cache.aspectj.AspectJJCacheConfiguration";
+    private static final boolean jsr107Present;
+    private static final boolean jcacheImplPresent;
+
+    public CachingConfigurationSelector() {
+    }
+
+    public String[] selectImports(AdviceMode adviceMode) {
+        switch(adviceMode) {
+        case PROXY:
+            return this.getProxyImports();
+        case ASPECTJ:
+            return this.getAspectJImports();
+        default:
+            return null;
+        }
+    }
+
+    private String[] getProxyImports() {
+        List<String> result = new ArrayList(3);
+        result.add(AutoProxyRegistrar.class.getName());
+        result.add(ProxyCachingConfiguration.class.getName());
+        if (jsr107Present && jcacheImplPresent) {
+            result.add("org.springframework.cache.jcache.config.ProxyJCacheConfiguration");
+        }
+
+        return StringUtils.toStringArray(result);
+    }
+
+    private String[] getAspectJImports() {
+        List<String> result = new ArrayList(2);
+        result.add("org.springframework.cache.aspectj.AspectJCachingConfiguration");
+        if (jsr107Present && jcacheImplPresent) {
+            result.add("org.springframework.cache.aspectj.AspectJJCacheConfiguration");
+        }
+
+        return StringUtils.toStringArray(result);
+    }
+
+    static {
+        ClassLoader classLoader = CachingConfigurationSelector.class.getClassLoader();
+        jsr107Present = ClassUtils.isPresent("javax.cache.Cache", classLoader);
+        jcacheImplPresent = ClassUtils.isPresent("org.springframework.cache.jcache.config.ProxyJCacheConfiguration", classLoader);
+    }
+}
+```
+
+CachingConfigurationSelector 类的核心是 `selectImports` 方法，根据 @EnableCaching 配置的模式，选择不同的配置类型，默认是PROXY模式，导入 `AutoProxyRegistrar` 和 `ProxyCachingConfiguration` 两个配置。
+
+# 缓存通知配置
+
+## AbstractCachingConfiguration
+
+父类 AbstractCachingConfiguration 实现：
+
+```java
+@Configuration
+public abstract class AbstractCachingConfiguration implements ImportAware {
+    @Nullable
+    protected AnnotationAttributes enableCaching;
+    @Nullable
+    protected Supplier<CacheManager> cacheManager;
+    @Nullable
+    protected Supplier<CacheResolver> cacheResolver;
+    @Nullable
+    protected Supplier<KeyGenerator> keyGenerator;
+    @Nullable
+    protected Supplier<CacheErrorHandler> errorHandler;
+
+    public AbstractCachingConfiguration() {
+    }
+
+    public void setImportMetadata(AnnotationMetadata importMetadata) {
+        this.enableCaching = AnnotationAttributes.fromMap(importMetadata.getAnnotationAttributes(EnableCaching.class.getName(), false));
+        if (this.enableCaching == null) {
+            throw new IllegalArgumentException("@EnableCaching is not present on importing class " + importMetadata.getClassName());
+        }
+    }
+
+    @Autowired(
+        required = false
+    )
+    void setConfigurers(Collection<CachingConfigurer> configurers) {
+        if (!CollectionUtils.isEmpty(configurers)) {
+            if (configurers.size() > 1) {
+                throw new IllegalStateException(configurers.size() + " implementations of CachingConfigurer were found when only 1 was expected. Refactor the configuration such that CachingConfigurer is implemented only once or not at all.");
+            } else {
+                CachingConfigurer configurer = (CachingConfigurer)configurers.iterator().next();
+                this.useCachingConfigurer(configurer);
+            }
+        }
+    }
+
+    protected void useCachingConfigurer(CachingConfigurer config) {
+        this.cacheManager = config::cacheManager;
+        this.cacheResolver = config::cacheResolver;
+        this.keyGenerator = config::keyGenerator;
+        this.errorHandler = config::errorHandler;
+    }
+}
+```
+
+这里主要做了两件事：首先把注解==元数据属性==解析出来，然后把==用户自定义的缓存组件==装配进来（CacheManager、KeyGenerator 和异常处理器）。
+
+## ProxyCachingConfiguration
 
 SpringCache 使用 Spring AOP 面向切面编程的机制来实现，当我们在 Configuration 类打上 @EnableCaching 注释时，除了启动 Spring AOP 机制外，引入的另一个类 `ProxyCachingConfiguration` 就是 SpringCache 具体实现相关 bean 的配置类。
 
@@ -60,7 +229,7 @@ public class ProxyCachingConfiguration extends AbstractCachingConfiguration {
 - `BeanFactoryCacheOperationSourceAdvisor`是一个`PointcutAdvisor`，是 SpringCache 使用 Spring AOP 机制的关键所在，该 advisor 会织入到需要执行缓存操作的 bean 的增强代理中，形成一个切面。并在方法调用时，在该切面上执行拦截器 CacheInterceptor 的业务逻辑。
 - `CacheInterceptor`是一个拦截器，当方法调用时碰到了 BeanFactoryCacheOperationSourceAdvisor 定义的切面，就会执行 CacheInterceptor 的业务逻辑，该业务逻辑就是==缓存的核心业务逻辑==。
 
-
+ProxyCachingConfiguration 复用了父类的能力，并且定了AOP的三个核心组件（Pointcut、Advice 和 Advisor）先看AnnotationCacheOperationSource（此时还不能被称作Pointcut）[^2]
 
 ## AnnotationCacheOperationSource
 
@@ -84,6 +253,8 @@ public interface CacheOperationSource {
 ```
 
 该方法用于根据<font color=red>指定类上的指定方法上打的 SpringCache 注释来得到对应的 CacheOperation 集合</font>。
+
+
 
 ### AbstractFallbackCacheOperationSource
 
@@ -128,6 +299,44 @@ protected abstract Collection<CacheOperation> findCacheOperations(Class<?> var1)
 @Nullable
 protected abstract Collection<CacheOperation> findCacheOperations(Method var1);
 ```
+
+cacheKey 是由 method 和 class 构造成的 MethodClassKey。如果缓存中有缓存，操作集合直接返回。否则调用 `computeCacheOperations` 计算：
+
+```java
+@Nullable
+private Collection<CacheOperation> computeCacheOperations(Method method, @Nullable Class<?> targetClass) {
+    if (this.allowPublicMethodsOnly() && !Modifier.isPublic(method.getModifiers())) {
+        return null;
+    } else {
+        Method specificMethod = AopUtils.getMostSpecificMethod(method, targetClass);
+        Collection<CacheOperation> opDef = this.findCacheOperations(specificMethod);
+        if (opDef != null) {
+            return opDef;
+        } else {
+            opDef = this.findCacheOperations(specificMethod.getDeclaringClass());
+            if (opDef != null && ClassUtils.isUserLevelMethod(method)) {
+                return opDef;
+            } else {
+                if (specificMethod != method) {
+                    opDef = this.findCacheOperations(method);
+                    if (opDef != null) {
+                        return opDef;
+                    }
+
+                    opDef = this.findCacheOperations(method.getDeclaringClass());
+                    if (opDef != null && ClassUtils.isUserLevelMethod(method)) {
+                        return opDef;
+                    }
+                }
+
+                return null;
+            }
+        }
+    }
+}
+```
+
+该方法是从目标类和目标方法上（优先方法维度）解析缓存注解装配成缓存操作（`@Cacheable` $\rightarrow$ `CacheableOperation`），看子类  `AnnotationCacheOperationSource` 实现。
 
 ### AnnotationCacheOperationSource
 
@@ -189,6 +398,10 @@ protected interface CacheOperationProvider {
 ```
 
 具体实现使用回调模式，用`Set<CacheAnnotaionParser>`中的每一个 CacheAnnotaionParser 去解析一个方法或类，然后将得到的`List<CacheOperation>`合并，最终返回。
+
+AnnotationCacheOperationSource 默认构造器使用的是 `SpringCacheAnnotationParser` 解析器，解析操作最终委托给 `SpringCacheAnnotationParser.parseCacheAnnotations`，<font color=red>将注解分别解析成对应的操作</font>[^2]。
+
+
 
 ### CacheAnnotaionParser
 
@@ -265,6 +478,8 @@ private Collection<CacheOperation> parseCacheAnnotations(SpringCacheAnnotationPa
 
 ## CacheInterceptor
 
+Spring 注册缓存管理器后，会对需要缓存方法对应的类进行 AOP 处理，核心逻辑为自定了一个`MethodInterceptor`拦截器`org.springframework.cache.interceptor.CacheInterceptor`，该拦截器会将方法调用转到`CacheAspectSupport.execute()`中。
+
 CacheInterceptor 继承了 `CacheAspectSupport` 并实现了 `MethodInterceptor` 接口，因此它本质上是一个 ==Advice==，也就是可在切面上执行的==增强逻辑==。
 
 CacheInterceptor 切面的拦截方法代码如下：
@@ -296,9 +511,35 @@ public class CacheInterceptor extends CacheAspectSupport implements MethodInterc
 }
 ```
 
+当拦截到调用时，将调用封装成 `CacheOperationInvoker` 并交给父类执行，父类 `CacheAspectSupport` 实现了 `SmartInitializingSingleton` 接口，在单例初始化后容器会调用 `afterSingletonsInstantiated` 方法[^2]。
+
+
+
 ### CacheAspectSupport
 
-这个增强逻辑的核心功能是在 `CacheAspectSupport` 中实现的，
+```java
+public void afterSingletonsInstantiated() {
+    if (this.getCacheResolver() == null) {
+        Assert.state(this.beanFactory != null, "CacheResolver or BeanFactory must be set on cache aspect");
+
+        try {
+            this.setCacheManager((CacheManager)this.beanFactory.getBean(CacheManager.class));
+        } catch (NoUniqueBeanDefinitionException var2) {
+            throw new IllegalStateException("No CacheResolver specified, and no unique bean of type CacheManager found. Mark one as primary or declare a specific CacheManager to use.");
+        } catch (NoSuchBeanDefinitionException var3) {
+            throw new IllegalStateException("No CacheResolver specified, and no bean of type CacheManager found. Register a CacheManager bean or remove the @EnableCaching annotation from your configuration.");
+        }
+    }
+
+    this.initialized = true;
+}
+```
+
+检查有没有合适的 CacheManager，并且将 initialized 设置为 true。
+
+继续看`CacheAspectSupport.execute`：
+
+这个增强逻辑的核心功能是在 `CacheAspectSupport` 中实现的，Spring 注册缓存管理器后，会对需要缓存方法对应的类进行 AOP 处理，核心逻辑为自定了一个`MethodInterceptor`拦截器`org.springframework.cache.interceptor.CacheInterceptor`，该拦截器会将方法调用转到`CacheAspectSupport.execute()`中：
 
 首先调用`AnnotationCacheOperationSource.getCacheOperations(method, targetClass)`方法得到被调用方法的`Collection<CacheOperation>`；
 
@@ -322,7 +563,32 @@ protected Object execute(CacheOperationInvoker invoker, Object target, Method me
 
     return invoker.invoke();
 }
+```
 
+使用 AnnotationCacheOperationSource 目标类和方法上的缓存注解解析成操作集合，然后构造`CacheAspectSupport#class CacheOperationContexts#CacheOperationContexts`上下文并调用重载方法[^2]：
+
+```java
+private class CacheOperationContexts {
+    private final MultiValueMap<Class<? extends CacheOperation>, CacheAspectSupport.CacheOperationContext> contexts;
+    private final boolean sync;
+
+    public CacheOperationContexts(Collection<? extends CacheOperation> operations, Method method, Object[] args, Object target, Class<?> targetClass) {
+        this.contexts = new LinkedMultiValueMap(operations.size());
+        Iterator var7 = operations.iterator();
+
+        while(var7.hasNext()) {
+            CacheOperation op = (CacheOperation)var7.next();
+            this.contexts.add(op.getClass(), CacheAspectSupport.this.getOperationContext(op, method, args, target, targetClass));
+        }
+
+        this.sync = this.determineSyncFlag(method);
+    }
+}
+```
+
+将每个操作包装对应上下文映射关系，并检查是否是同步操作（@Cacheable独有属性），继续看 execute：
+
+```java
 // 该方法封装了SpringCache核心的处理逻辑，也就是使用 Cache 配合来完成用户的方法调用，并返回结果
 @Nullable
 private Object execute(CacheOperationInvoker invoker, Method method, CacheAspectSupport.CacheOperationContexts contexts) {
@@ -342,8 +608,11 @@ private Object execute(CacheOperationInvoker invoker, Method method, CacheAspect
         }
     }
 
+    // 删除操作
     this.processCacheEvicts(contexts.get(CacheEvictOperation.class), true, CacheOperationExpressionEvaluator.NO_RESULT);
+    // 获取对应的缓存
     ValueWrapper cacheHit = this.findCachedItem(contexts.get(CacheableOperation.class));
+    // 缓存不存在，则从context中获取
     List<CacheAspectSupport.CachePutRequest> cachePutRequests = new LinkedList();
     if (cacheHit == null) {
         this.collectPutRequests(contexts.get(CacheableOperation.class), CacheOperationExpressionEvaluator.NO_RESULT, cachePutRequests);
@@ -367,12 +636,362 @@ private Object execute(CacheOperationInvoker invoker, Method method, CacheAspect
         cachePutRequest.apply(cacheValue);
     }
 
+    // 后置缓存删除操作
     this.processCacheEvicts(contexts.get(CacheEvictOperation.class), false, cacheValue);
     return returnValue;
 }
 ```
 
-## BeanFactoryCacheOperationSourceAdvisor
+该方法是缓存操作的核心逻辑[^2]：
+
+- 首先检查是否是同步操作（@Cacheable特性）。
+  - 如果是且满足条件，调用缓存获取逻辑并返回；
+  - 否则返回业务逻辑免缓存调用 invokeOperation。
+- 然后执行 @CacheEvict 的前置清除（beforeInvocation=true）。
+- 接着检查 @Cacheable 是否命中缓存：如果没有命中则放入需要执行 CachePutRequest 列表暂存。
+- 然后检查是否缓存命中且没有需要更新的缓存：
+  - 如果满足则返回结果，使用缓存结果。否则使用业务查询结果作为返回结果，并且填充需要缓存的结果。
+- 然后收集 @CachePut 操作，把 @CachePut 和 @Cacheable 未命中的请求同步到缓存。
+- 最后清理 @CacheEvict 的缓存（beforeInvocation=false）。
+
+
+
+# 缓存代理装配
+
+前边讲述了缓存配置和工作流程，那么上述的 Aop 配置什么时候生效？在哪里生效?如何生效？
+
+接下来将从`AutoProxyRegistrar`作为切入点，展开分析缓存代理的装配逻辑[^2]。
+
+## AutoProxyRegistrar
+
+```java
+public class AutoProxyRegistrar implements ImportBeanDefinitionRegistrar {
+    private final Log logger = LogFactory.getLog(this.getClass());
+
+    public AutoProxyRegistrar() {
+    }
+
+    public void registerBeanDefinitions(AnnotationMetadata importingClassMetadata, BeanDefinitionRegistry registry) {
+        boolean candidateFound = false;
+        Set<String> annTypes = importingClassMetadata.getAnnotationTypes();
+        Iterator var5 = annTypes.iterator();
+
+        while(var5.hasNext()) {
+            String annType = (String)var5.next();
+            AnnotationAttributes candidate = AnnotationConfigUtils.attributesFor(importingClassMetadata, annType);
+            if (candidate != null) {
+                Object mode = candidate.get("mode");
+                Object proxyTargetClass = candidate.get("proxyTargetClass");
+                if (mode != null && proxyTargetClass != null && AdviceMode.class == mode.getClass() && Boolean.class == proxyTargetClass.getClass()) {
+                    candidateFound = true;
+                    if (mode == AdviceMode.PROXY) {
+                        // 手动注册自动代理创建器
+                        AopConfigUtils.registerAutoProxyCreatorIfNecessary(registry);
+                        if ((Boolean)proxyTargetClass) {
+                            AopConfigUtils.forceAutoProxyCreatorToUseClassProxying(registry);
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (!candidateFound && this.logger.isInfoEnabled()) {
+            String name = this.getClass().getSimpleName();
+            this.logger.info(String.format("%s was imported but no annotations were found having both 'mode' and 'proxyTargetClass' attributes of type AdviceMode and boolean respectively. This means that auto proxy creator registration and configuration may not have occurred as intended, and components may not be proxied as expected. Check to ensure that %s has been @Import'ed on the same class where these annotations are declared; otherwise remove the import of %s altogether.", name, name, name));
+        }
+
+    }
+}
+```
+
+AutoProxyRegistrar 实现了`ImportBeanDefinitionRegistrar`接口，`registerBeanDefinitions` 会从启用缓存注解 @EnableCaching 提取属性，然后手动注册自动代理创建器：
+
+```java
+public abstract class AopConfigUtils {
+    ......
+    @Nullable
+    public static BeanDefinition registerAutoProxyCreatorIfNecessary(BeanDefinitionRegistry registry, @Nullable Object source) {
+        return registerOrEscalateApcAsRequired(InfrastructureAdvisorAutoProxyCreator.class, registry, source);
+    }
+    ......
+    
+    @Nullable
+    private static BeanDefinition registerOrEscalateApcAsRequired(Class<?> cls, BeanDefinitionRegistry registry, @Nullable Object source) {
+        Assert.notNull(registry, "BeanDefinitionRegistry must not be null");
+        if (registry.containsBeanDefinition("org.springframework.aop.config.internalAutoProxyCreator")) {
+            BeanDefinition apcDefinition = registry.getBeanDefinition("org.springframework.aop.config.internalAutoProxyCreator");
+            if (!cls.getName().equals(apcDefinition.getBeanClassName())) {
+                int currentPriority = findPriorityForClass(apcDefinition.getBeanClassName());
+                int requiredPriority = findPriorityForClass(cls);
+                if (currentPriority < requiredPriority) {
+                    apcDefinition.setBeanClassName(cls.getName());
+                }
+            }
+
+            return null;
+        } else {
+            RootBeanDefinition beanDefinition = new RootBeanDefinition(cls);
+            beanDefinition.setSource(source);
+            beanDefinition.getPropertyValues().add("order", -2147483648);
+            beanDefinition.setRole(2);
+            registry.registerBeanDefinition("org.springframework.aop.config.internalAutoProxyCreator", beanDefinition);
+            return beanDefinition;
+        }
+    }
+    ......
+}
+```
+
+手动注册了 `InfrastructureAdvisorAutoProxyCreato`r 到容器中，看一下 InfrastructureAdvisorAutoProxyCreator 继承关系：
+
+
+
+```java
+package org.springframework.aop.framework.autoproxy;
+
+public class InfrastructureAdvisorAutoProxyCreator extends AbstractAdvisorAutoProxyCreator {
+    @Nullable
+    private ConfigurableListableBeanFactory beanFactory;
+
+    public InfrastructureAdvisorAutoProxyCreator() {
+    }
+
+    protected void initBeanFactory(ConfigurableListableBeanFactory beanFactory) {
+        super.initBeanFactory(beanFactory);
+        this.beanFactory = beanFactory;
+    }
+
+    protected boolean isEligibleAdvisorBean(String beanName) {
+        return this.beanFactory != null && this.beanFactory.containsBeanDefinition(beanName) && this.beanFactory.getBeanDefinition(beanName).getRole() == 2;
+    }
+}
+```
+
+InfrastructureAdvisorAutoProxyCreator 继承了 AbstractAdvisorAutoProxyCreator 类，实现了 BeanFactory 初始化和 isEligibleAdvisorBean 方法。
+
+## AbstractAdvisorAutoProxyCreator 
+
+AbstractAdvisorAutoProxyCreator 定义了 Advisor 操作的工具方法，并且定义了 Advisor 提取适配器 BeanFactoryAdvisorRetrievalHelperAdapter，委托给子类 isEligibleAdvisorBean 方法实现（InfrastructureAdvisorAutoProxyCreator）。 
+
+
+
+重点在于 AbstractAdvisorAutoProxyCreator 父类 AbstractAutoProxyCreator 实现的 postProcessBeforeInstantiation 方法。该方法在 InstantiationAwareBeanPostProcessor 接口定义，该方法在 bean 创建之前调用。如果该方法返回非null对象，那么 bean 的创建过程将会短路。此处的作用是为满足 BeanFactoryCacheOperationSourceAdvisor 增强器切入逻辑的类织入增强逻辑，也就是缓存能力。
+
+```java
+// AbstractAutoProxyCreator 
+public Object postProcessBeforeInstantiation(Class<?> beanClass, String beanName) {
+    Object cacheKey = this.getCacheKey(beanClass, beanName);
+    if (!StringUtils.hasLength(beanName) || !this.targetSourcedBeans.contains(beanName)) {
+        if (this.advisedBeans.containsKey(cacheKey)) {
+            return null;
+        }
+
+        if (this.isInfrastructureClass(beanClass) || this.shouldSkip(beanClass, beanName)) {
+            this.advisedBeans.put(cacheKey, Boolean.FALSE);
+            return null;
+        }
+    }
+
+    TargetSource targetSource = this.getCustomTargetSource(beanClass, beanName);
+    if (targetSource != null) {
+        if (StringUtils.hasLength(beanName)) {
+            this.targetSourcedBeans.add(beanName);
+        }
+
+        Object[] specificInterceptors = this.getAdvicesAndAdvisorsForBean(beanClass, beanName, targetSource);
+        Object proxy = this.createProxy(beanClass, beanName, specificInterceptors, targetSource);
+        this.proxyTypes.put(cacheKey, proxy.getClass());
+        return proxy;
+    } else {
+        return null;
+    }
+}
+```
+
+此处的逻辑和 AsyncAnnotationBeanPostProcessor 的 postProcessAfterInitialization 方法很相似，都是拦截 bean 创建过程并织入增强逻辑。
+
+这里是自动生成代理类并且将缓存逻辑织入进去。也是自动代理实现APC的核心逻辑。
+
+该方法前半段是从缓存中获取目标类是否被代理过，如果被代理过直接把增强逻辑织入，避免重复创建代理。后半段就是生成代理的逻辑，创建代理过程我们之前分析过，此处不再分析，重点分析一下从候选增强器中获取增强逻辑的方法getAdvicesAndAdvisorsForBean：
+
+```java
+// AbstractAdvisorAutoProxyCreator 
+@Nullable
+protected Object[] getAdvicesAndAdvisorsForBean(Class<?> beanClass, String beanName, @Nullable TargetSource targetSource) {
+    List<Advisor> advisors = this.findEligibleAdvisors(beanClass, beanName);
+    return advisors.isEmpty() ? DO_NOT_PROXY : advisors.toArray();
+}
+```
+
+该方法在子类 AbstractAdvisorAutoProxyCreator 中实现，接着调用了 findEligibleAdvisors 方法：
+
+```java
+protected List<Advisor> findEligibleAdvisors(Class<?> beanClass, String beanName) {
+    List<Advisor> candidateAdvisors = this.findCandidateAdvisors();
+    List<Advisor> eligibleAdvisors = this.findAdvisorsThatCanApply(candidateAdvisors, beanClass, beanName);
+    this.extendAdvisors(eligibleAdvisors);
+    if (!eligibleAdvisors.isEmpty()) {
+        eligibleAdvisors = this.sortAdvisors(eligibleAdvisors);
+    }
+
+    return eligibleAdvisors;
+}
+```
+
+先通过前边定义的 BeanFactoryAdvisorRetrievalHelper 获取候选增强器，然后调用 findAdvisorsThatCanApply 方法筛选出对当前代理类适用的增强器：
+
+```java
+protected List<Advisor> findAdvisorsThatCanApply(List<Advisor> candidateAdvisors, Class<?> beanClass, String beanName) {
+    ProxyCreationContext.setCurrentProxiedBeanName(beanName);
+
+    List var4;
+    try {
+        var4 = AopUtils.findAdvisorsThatCanApply(candidateAdvisors, beanClass);
+    } finally {
+        ProxyCreationContext.setCurrentProxiedBeanName((String)null);
+    }
+
+    return var4;
+}
+```
+
+### AopUtils
+
+该方法将筛选逻辑委托为Aop工具类（AopUtils）的 findAdvisorsThatCanApply 方法处理：
+
+```java
+// AopUtils.java
+public static List<Advisor> findAdvisorsThatCanApply(List<Advisor> candidateAdvisors, Class<?> clazz) {
+    if (candidateAdvisors.isEmpty()) {
+        return candidateAdvisors;
+    } else {
+        List<Advisor> eligibleAdvisors = new ArrayList();
+        Iterator var3 = candidateAdvisors.iterator();
+
+        while(var3.hasNext()) {
+            Advisor candidate = (Advisor)var3.next();
+            if (candidate instanceof IntroductionAdvisor && canApply(candidate, clazz)) {
+                eligibleAdvisors.add(candidate);
+            }
+        }
+
+        boolean hasIntroductions = !eligibleAdvisors.isEmpty();
+        Iterator var7 = candidateAdvisors.iterator();
+
+        while(var7.hasNext()) {
+            Advisor candidate = (Advisor)var7.next();
+            if (!(candidate instanceof IntroductionAdvisor) && canApply(candidate, clazz, hasIntroductions)) {
+                eligibleAdvisors.add(candidate);
+            }
+        }
+
+        return eligibleAdvisors;
+    }
+}
+```
+
+从 ProxyCachingConfiguration 中增强器的定义来看，BeanFactoryCacheOperationSourceAdvisor 是 PointcutAdvisor 类型，方法前半段 IntroductionAdvisor 逻辑跳过，通过 canApply 检查是否符合条件,如果符合则加入返回列表：
+
+```java
+public static boolean canApply(Advisor advisor, Class<?> targetClass, boolean hasIntroductions) {
+    if (advisor instanceof IntroductionAdvisor) {
+        return ((IntroductionAdvisor)advisor).getClassFilter().matches(targetClass);
+    } else if (advisor instanceof PointcutAdvisor) {
+        PointcutAdvisor pca = (PointcutAdvisor)advisor;
+        return canApply(pca.getPointcut(), targetClass, hasIntroductions);
+    } else {
+        return true;
+    }
+}
+```
+
+直接进入第二个条件分支，检查 PointcutAdvisor 是否符合切入逻辑：
+
+```java
+public static boolean canApply(Pointcut pc, Class<?> targetClass, boolean hasIntroductions) {
+    Assert.notNull(pc, "Pointcut must not be null");
+    if (!pc.getClassFilter().matches(targetClass)) {
+        return false;
+    } else {
+        MethodMatcher methodMatcher = pc.getMethodMatcher();
+        if (methodMatcher == MethodMatcher.TRUE) {
+            return true;
+        } else {
+            IntroductionAwareMethodMatcher introductionAwareMethodMatcher = null;
+            if (methodMatcher instanceof IntroductionAwareMethodMatcher) {
+                introductionAwareMethodMatcher = (IntroductionAwareMethodMatcher)methodMatcher;
+            }
+
+            Set<Class<?>> classes = new LinkedHashSet();
+            if (!Proxy.isProxyClass(targetClass)) {
+                classes.add(ClassUtils.getUserClass(targetClass));
+            }
+
+            classes.addAll(ClassUtils.getAllInterfacesForClassAsSet(targetClass));
+            Iterator var6 = classes.iterator();
+
+            while(var6.hasNext()) {
+                Class<?> clazz = (Class)var6.next();
+                Method[] methods = ReflectionUtils.getAllDeclaredMethods(clazz);
+                Method[] var9 = methods;
+                int var10 = methods.length;
+
+                for(int var11 = 0; var11 < var10; ++var11) {
+                    Method method = var9[var11];
+                    if (introductionAwareMethodMatcher != null) {
+                        if (introductionAwareMethodMatcher.matches(method, targetClass, hasIntroductions)) {
+                            return true;
+                        }
+                    } else if (methodMatcher.matches(method, targetClass)) {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+    }
+}
+```
+
+这个方法也不复杂，其实就是检查目标类和方法上是否有缓存相关注解（@Cacheable,@CachePut,@CacheEvict等）。如果有，说明增强器对目标代理类适用，然后找到合适的增强器列表在APC中调用 createProxy 创建代理：
+
+```java
+// AbstractAutoProxyCreator 
+protected Object createProxy(Class<?> beanClass, @Nullable String beanName, @Nullable Object[] specificInterceptors, TargetSource targetSource) {
+    if (this.beanFactory instanceof ConfigurableListableBeanFactory) {
+        AutoProxyUtils.exposeTargetClass((ConfigurableListableBeanFactory)this.beanFactory, beanName, beanClass);
+    }
+
+    ProxyFactory proxyFactory = new ProxyFactory();
+    proxyFactory.copyFrom(this);
+    if (!proxyFactory.isProxyTargetClass()) {
+        if (this.shouldProxyTargetClass(beanClass, beanName)) {
+            proxyFactory.setProxyTargetClass(true);
+        } else {
+            this.evaluateProxyInterfaces(beanClass, proxyFactory);
+        }
+    }
+
+    Advisor[] advisors = this.buildAdvisors(beanName, specificInterceptors);
+    proxyFactory.addAdvisors(advisors);
+    proxyFactory.setTargetSource(targetSource);
+    this.customizeProxyFactory(proxyFactory);
+    proxyFactory.setFrozen(this.freezeProxy);
+    if (this.advisorsPreFiltered()) {
+        proxyFactory.setPreFiltered(true);
+    }
+
+    return proxyFactory.getProxy(this.getProxyClassLoader());
+}
+```
+
+这里创建代理工厂，然后选择是否需要直接代理目标类，然后装配增强器，然后调用 JdkDynamicAopProxy 或者 CglibAopProxy 创建代理。
+
+
+
+## BeanFactoryCacheOperationSourceAdvisor[^1]
 
 它负责将`CacheInterceptor`与`CacheOperationSourcePointcut`结合起来。其内部注入了`AnnotationCacheOperationSource`，并创建了`CacheOperationSourcePointcut`：
 
@@ -453,7 +1072,62 @@ public BeanFactoryCacheOperationSourceAdvisor cacheAdvisor(
 
 `BeanFactoryCacheOperationSourceAdvisor`切入后执行的业务逻辑就是`CacheInterceptor`中的`invoke(MethodInvocation invocation)`方法。在该方法中，调用其父类`CacheAspectSupport`中的方法来完成缓存的核心处理逻辑，并返回结果。
 
-# SpringCache 自动配置
+# 缓存配置
+
+引入依赖：
+
+```xml
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-cache</artifactId>
+    <version>2.1.3.RELEASE</version>
+</dependency>
+```
+
+在应用启动类添加 @EnableCaching 注解：
+
+```java
+@SpringBootApplication
+@EnableCaching
+public class Application {
+
+    public static void main(String[] args) {
+        SpringApplication.run(Application.class, args);
+    }
+}
+```
+
+在业务方法添加 @Cacheable 注解：
+
+```java
+@Cacheable(cacheNames = {"task"})
+public TaskInfoDTO getTask(String taskId) {
+    log.info("TestBuzz.getTask mock query from DB......");
+    TaskInfoDTO taskInfoDTO = new TaskInfoDTO();
+    taskInfoDTO.setTaskId(taskId);
+    taskInfoDTO.setApplicantId("system");
+    taskInfoDTO.setDescription("test");
+    return taskInfoDTO;
+}
+```
+
+引入了缓存依赖、开启缓存能力就能直接使用缓存了，并没有引入或者配置其他的缓存组件。
+
+为什么直接就能使用缓存？
+
+如果应用架构基于 Spring 而不是 Springboot，那么肯定是要自己配置 CacheResolver 或者 CacheManager。为什么这里不需要？
+
+这一切还是要归功于` spring-boot-autoconfigure`，我们使用 SpringBoot 作为基础框架时，一般都会显式或者间接把其引入：
+
+
+
+spring-boot-autoconfigure 有个包叫 cache，毫无疑问，这里就是 SpringBoot <font color=red>定义并自动开启缓存配置</font>的地方。该包下基本都是`*Configuration`类型的类，也就是 SpringBoot 自带的缓存相关配置。
+
+我们简单分析一下CacheAutoConfiguration、CacheConfigurations、GenericCacheConfiguration、NoOpCacheConfiguration、SimpleCacheConfiguration、CaffeineCacheConfiguration 和 RedisCacheConfiguration这几个配置类。 
+
+
+
+## CacheAutoConfiguration
 
 当我们在 SpringBoot 中使用默认实现时，由于其自动配置机制，我们甚至都不需要自己配置 CacheManager。在`spring-boot-autoconfigure`模块里有专门配置 SpringCache 的配置类 `CacheAutoConfiguration`：
 
@@ -477,6 +1151,17 @@ public class CacheAutoConfiguration {
     }
 
    ......
+   
+    @Bean
+    @ConditionalOnMissingBean
+    public CacheManagerCustomizers cacheManagerCustomizers(ObjectProvider<CacheManagerCustomizer<?>> customizers) {
+        return new CacheManagerCustomizers((List)customizers.orderedStream().collect(Collectors.toList()));
+    }
+
+    @Bean
+    public CacheAutoConfiguration.CacheManagerValidator cacheAutoConfigurationValidator(CacheProperties cacheProperties, ObjectProvider<CacheManager> cacheManager) {
+        return new CacheAutoConfiguration.CacheManagerValidator(cacheProperties, cacheManager);
+    }
 
     static class CacheConfigurationImportSelector implements ImportSelector {
         CacheConfigurationImportSelector() {
@@ -509,11 +1194,42 @@ public class CacheAutoConfiguration {
 
 其中 CacheAspectSupport 是 CacheInterceptor 的父类，SpringCache 真正的核心业务逻辑是由它实现的。当打上 @CacheEnable 注释时，自动配置了 CacheInterceptor 的 bean ，也就是 CacheAspectSupport 的 bean，因此肯定存在。
 
+这个类是 SpringBoot <font color=red>默认缓存配置的入口</font>，类名上有很多注解，限制了改配置的启动条件和装配规则等[^2]：
 
+- `@ConditionalOnClass(CacheManager.class)`限制应用类路径中必须有 CacheManager 实现；
+- `@ConditionalOnBean(CacheAspectSupport.class)`限制应用容器中必须有 CacheAspectSupport 或者子类实例；
+- `@ConditionalOnMissingBean(value = CacheManager.class, name = "cacheResolver")`限制应用容器中不能有类型为 CacheManager，且名称为 cacheResolver 的bean，<font color=red>如果用户自定义了那么该配置就失效</font>；
+- `@EnableConfigurationProperties(CacheProperties.class)`是表示启用缓存属性配置；
+- `@AutoConfigureAfter`限制该类在 CouchbaseAutoConfiguration、HazelcastAutoConfiguration、HibernateJpaAutoConfiguration 和 RedisAutoConfiguration 之后配置；
+- `@Import(CacheConfigurationImportSelector.class)`引入了内部定义的 CacheConfigurationImportSelector 配置。
+
+
+
+### CacheConfigurationImportSelector
 
 CacheAutoConfiguration 通过 @Import 机制引入 `CacheManagerCustomizers.class` 和 `CacheConfigurationImportSelector.class` 。
 
-其中 CacheConfigurationImportSelector 使用`CacheType.values()`作为 Key，遍历并创建将要加载的配置类全名的字符串数组。枚举 CacheType（cache 类型）的代码为：
+```java
+static class CacheConfigurationImportSelector implements ImportSelector {
+    CacheConfigurationImportSelector() {
+    }
+
+    public String[] selectImports(AnnotationMetadata importingClassMetadata) {
+        CacheType[] types = CacheType.values();
+        String[] imports = new String[types.length];
+
+        for(int i = 0; i < types.length; ++i) {
+            imports[i] = CacheConfigurations.getConfigurationClass(types[i]);
+        }
+
+        return imports;
+    }
+}
+```
+
+该类会导入 CacheType 中定义的所有支持的缓存类型配置。
+
+CacheConfigurationImportSelector 使用`CacheType.values()`作为 Key，遍历并创建将要加载的配置类全名的字符串数组。枚举 CacheType（cache 类型）的代码为：
 
 ```java
 package org.springframework.boot.autoconfigure.cache;
@@ -534,6 +1250,10 @@ public enum CacheType {
     }
 }
 ```
+
+CacheAutoConfiguration 中还定义了几个 bean，CacheManagerCustomizers 是 CacheManager 容器；CacheManagerValidator 在调用时检查 CacheManager 是否存在并给出自定义异常；CacheManagerJpaDependencyConfiguration 是对 CacheManager 依赖 Jpa 相关属性的定义和后置处理。
+
+## CacheConfigurations
 
 同时在 CacheConfigurations 类中定义了各不同类型的 cache 对应的配置类：
 
@@ -593,7 +1313,19 @@ final class CacheConfigurations {
 - NoOpCacheConfiguration的生效条件是：不存在 CacheManager 的 bean，并且没有定义 spring.cache.type 或者 spring.cache.type 的值为 none。
 - 其他的配置类都有各自额外的要求，例如需要引入相应的类库支持。
 
-因此当我们没有引入任何其他类库，没有配置 Cache bean 并且没有指定 spring.cache.type 时，从上到下判断，GenericCacheConfiguration 不起作用（未定义Cache bean）。后续的一系列与第三方存储实现方案集成的配置类也不起作用（未引入相应类库），最后轮到 SimpleCacheConfiguration 符合条件起作用了。因此此时使用 SimpleCacheConfiguration 来进行 SpringCache 的配置：
+在项目中添加某个缓存管理组件（例如 Redis）后，Spring Boot 项目会选择并启用对应的缓存管理器。
+
+如果项目中同时添加了==多个缓存组件==，且==没有指定缓存管理器或者缓存解析器==（CacheManager或者cacheResolver），那么Spring Boot 会按照上述顺序，在添加的多个缓存中优先启用指定的缓存组件进行缓存管理。
+
+Spring Boot 默认缓存管理中，没有添加任何缓存管理组件能实现缓存管理。这是因为开启缓存管理后，Spring Boot 会按照上述列表顺序查找有效的缓存组件进行缓存管理，如果没有任何缓存组件，会默认使用Simple缓存组件进行管理。Simple 缓存组件是 Spring Boot 默认的缓存管理组件，它默认使用内存中的 ConcurrentMap 进行缓存存储，所以在没有添加任何第三方缓存组件的情况下，可以实现内存中的缓存管理，但是不推荐使用这种缓存管理方式。
+
+<font color=red>当在 Spring Boot 默认缓存管理的基础上引入 Redis 缓存组件，即在 pom.xml 文件中添加 Spring Data Redis 依赖启动器后， SpringBoot 会使用 RedisCacheConfigratioin 当做生效的自动配置类进行缓存相关的自动装配，容器中使用的缓存管理器是 RedisCacheManager，这个缓存管理器创建的 Cache 为 RedisCache，进而操控 Redis 进行数据的缓存</font>[^3]。
+
+## SimpleCacheConfiguration 
+
+当我们==没有引入任何其他类库==，==没有配置 Cache bean== 并且==没有指定 spring.cache.type== 时，从上到下判断，GenericCacheConfiguration 不起作用（未定义Cache bean）。后续的一系列与第三方存储实现方案集成的配置类也不起作用（未引入相应类库），最后轮到 SimpleCacheConfiguration 符合条件起作用了。
+
+此时使用 SimpleCacheConfiguration 来进行 SpringCache 的配置：
 
 ```java
 package org.springframework.boot.autoconfigure.cache;
@@ -638,6 +1370,116 @@ public void setCacheNames(@Nullable Collection<String> cacheNames) {
 ```
 
 因此，由于 SpringBoot 的自动配置机制， 我们只需要打上 @EnableCaching 标注就可以启动 SpringCache 机制，使用其开箱即用的缓存实现方案。
+
+## RedisCacheConfiguration
+
+```java
+package org.springframework.boot.autoconfigure.cache;
+
+@Configuration(
+    proxyBeanMethods = false
+)
+@ConditionalOnClass({RedisConnectionFactory.class})
+@AutoConfigureAfter({RedisAutoConfiguration.class})
+@ConditionalOnBean({RedisConnectionFactory.class})
+@ConditionalOnMissingBean({CacheManager.class})
+@Conditional({CacheCondition.class})
+class RedisCacheConfiguration {
+    RedisCacheConfiguration() {
+    }
+
+    @Bean
+    RedisCacheManager cacheManager(CacheProperties cacheProperties, CacheManagerCustomizers cacheManagerCustomizers, ObjectProvider<org.springframework.data.redis.cache.RedisCacheConfiguration> redisCacheConfiguration, ObjectProvider<RedisCacheManagerBuilderCustomizer> redisCacheManagerBuilderCustomizers, RedisConnectionFactory redisConnectionFactory, ResourceLoader resourceLoader) {
+        RedisCacheManagerBuilder builder = RedisCacheManager.builder(redisConnectionFactory).cacheDefaults(this.determineConfiguration(cacheProperties, redisCacheConfiguration, resourceLoader.getClassLoader()));
+        List<String> cacheNames = cacheProperties.getCacheNames();
+        if (!cacheNames.isEmpty()) {
+            builder.initialCacheNames(new LinkedHashSet(cacheNames));
+        }
+
+        redisCacheManagerBuilderCustomizers.orderedStream().forEach((customizer) -> {
+            customizer.customize(builder);
+        });
+        return (RedisCacheManager)cacheManagerCustomizers.customize(builder.build());
+    }
+
+    private org.springframework.data.redis.cache.RedisCacheConfiguration determineConfiguration(CacheProperties cacheProperties, ObjectProvider<org.springframework.data.redis.cache.RedisCacheConfiguration> redisCacheConfiguration, ClassLoader classLoader) {
+        return (org.springframework.data.redis.cache.RedisCacheConfiguration)redisCacheConfiguration.getIfAvailable(() -> {
+            return this.createConfiguration(cacheProperties, classLoader);
+        });
+    }
+
+    private org.springframework.data.redis.cache.RedisCacheConfiguration createConfiguration(CacheProperties cacheProperties, ClassLoader classLoader) {
+        Redis redisProperties = cacheProperties.getRedis();
+        org.springframework.data.redis.cache.RedisCacheConfiguration config = org.springframework.data.redis.cache.RedisCacheConfiguration.defaultCacheConfig();
+        config = config.serializeValuesWith(SerializationPair.fromSerializer(new JdkSerializationRedisSerializer(classLoader)));
+        if (redisProperties.getTimeToLive() != null) {
+            config = config.entryTtl(redisProperties.getTimeToLive());
+        }
+
+        if (redisProperties.getKeyPrefix() != null) {
+            config = config.prefixCacheNameWith(redisProperties.getKeyPrefix());
+        }
+
+        if (!redisProperties.isCacheNullValues()) {
+            config = config.disableCachingNullValues();
+        }
+
+        if (!redisProperties.isUseKeyPrefix()) {
+            config = config.disableKeyPrefix();
+        }
+
+        return config;
+    }
+}
+```
+
+RedisCacheConfiguration 注入了 RedisCacheManager 类型的 bean，该配置生效有几个条件：
+
+- 只有应用引入了 redis 依赖，并且定义了 RedisConnectionFactory；
+- 没有定义其他类型的 CacheManager；
+- `spring.cache.type` 属性为 redis；
+- 在 RedisAutoConfiguration 之后配置。
+
+redis 类型的缓存配置稍微复杂，依赖了 RedisAutoConfiguration 配置：
+
+```java
+package org.springframework.boot.autoconfigure.data.redis;
+
+@Configuration(
+    proxyBeanMethods = false
+)
+@ConditionalOnClass({RedisOperations.class})
+@EnableConfigurationProperties({RedisProperties.class})
+@Import({LettuceConnectionConfiguration.class, JedisConnectionConfiguration.class})
+public class RedisAutoConfiguration {
+    public RedisAutoConfiguration() {
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(
+        name = {"redisTemplate"}
+    )
+    public RedisTemplate<Object, Object> redisTemplate(RedisConnectionFactory redisConnectionFactory) throws UnknownHostException {
+        RedisTemplate<Object, Object> template = new RedisTemplate();
+        template.setConnectionFactory(redisConnectionFactory);
+        return template;
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public StringRedisTemplate stringRedisTemplate(RedisConnectionFactory redisConnectionFactory) throws UnknownHostException {
+        StringRedisTemplate template = new StringRedisTemplate();
+        template.setConnectionFactory(redisConnectionFactory);
+        return template;
+    }
+}
+```
+
+RedisAutoConfiguration 依赖 redis，并且导入了 LettuceConnectionConfiguration 和 JedisConnectionConfiguration 连接配置，定义了 RedisTemplate 和 StringRedisTemplate 两个 bean 供 RedisCacheManager 使用。
+
+
+
+
 
 # SpringCache 注解解析
 
@@ -1208,9 +2050,17 @@ processCacheEvicts(contexts.get(CacheEvictOperation.class), false, cacheValue);
 7. 执行cachePutRequests，将数据写入缓存（unless为空或者unless解析结果为false）；
 8. 执行@CacheEvict（如果beforeInvocation=false且condition通过），如果allEntries=true，则清空所有。
 
+
+
+
+
+
+
 # 参考资料
 
-[^1]:[SpringCache实现原理及核心业务逻辑（一）_不动明王1984的博客-CSDN博客_springcache](https://blog.csdn.net/m0_37962779/article/details/78671468)
-
-
-
+[^1]: [SpringCache实现原理及核心业务逻辑（一）_不动明王1984的博客-CSDN博客_springcache](https://blog.csdn.net/m0_37962779/article/details/78671468)
+[^2]: [Spring cache原理详解 - 掘金 (juejin.cn)](https://juejin.cn/post/6959002694539444231)
+[^3]: [浅析SpringBoot缓存原理探究、SpringCache常用注解介绍及如何集成Redis](https://itcn.blog/p/1648146775684444.html)
+[^4]: [spring cache原理——草丛里的码农](https://blog.csdn.net/wzl1369248650/article/details/95656093)
+[^5]: [Spring缓存基础设施介绍 | Java工匠 (czwer.github.io)](https://czwer.github.io/2018/06/02/Spring缓存基础设施介绍/)：重要
+[^6]: [Spring缓存管理原理 | Java工匠 (czwer.github.io)](https://czwer.github.io/2018/06/02/Spring缓存管理原理/)：重要
