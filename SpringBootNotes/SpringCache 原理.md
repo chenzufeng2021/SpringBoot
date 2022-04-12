@@ -2064,3 +2064,5 @@ processCacheEvicts(contexts.get(CacheEvictOperation.class), false, cacheValue);
 [^4]: [spring cache原理——草丛里的码农](https://blog.csdn.net/wzl1369248650/article/details/95656093)
 [^5]: [Spring缓存基础设施介绍 | Java工匠 (czwer.github.io)](https://czwer.github.io/2018/06/02/Spring缓存基础设施介绍/)：重要
 [^6]: [Spring缓存管理原理 | Java工匠 (czwer.github.io)](https://czwer.github.io/2018/06/02/Spring缓存管理原理/)：重要
+
+cc
