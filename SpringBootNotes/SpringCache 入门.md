@@ -6,7 +6,7 @@ typora-copy-images-to: SpringBootNotesPictures
 
 SpringCache 是 SpringFramework 3.1 引入的新特性，提供了基于==注解==的缓存配置方法。它本质上<font color=red>不是一个具体的缓存实现方案</font>（例如EHCache），而是一个<font color=red>对缓存使用的抽象</font>。通过在已有代码中打上几个预定义的注释，就可以实现我们希望达到的缓存效果。
 
-SpringCache 支持和第三方缓存例如EHCache集成；另外也提供了开箱即用的默认实现，可以直接拿来使用。
+SpringCache 支持和第三方缓存例如 EHCache 集成；另外也提供了开箱即用的默认实现，可以直接拿来使用。
 
 SpringCache 支持使用 SpEL（Spring Expression Language）来定义缓存的 key 和各种 condition，因此具备相当的灵活性，并可以支持非常复杂的语义。[^6]
 
@@ -143,7 +143,7 @@ Spring Cache是一个对缓存使用的抽象，它提供了多种存储集成�
 
 要使用它们，需要简单地声明一个适当的`CacheManager`：一个控制和管理`Cache`的实体。
 
-CacheManager非常简单：
+CacheManager 非常简单：
 
 ```java
 public interface CacheManager {
@@ -602,18 +602,57 @@ public User find(Integer id) {
 
 # 使用样例
 
+由于是 SpringFramework 的内置功能，使用 SpringCache 并不需要额外引入 Jar 包。并且只需要简单的配置，就可以启用==开箱即用的默认缓存==实现。
+
+引入依赖：
+
+```xml
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-cache</artifactId>
+    <version>2.1.3.RELEASE</version>
+</dependency>
+```
+
+在应用启动类添加 @EnableCaching 注解：
+
+```java
+@SpringBootApplication
+@EnableCaching
+public class Application {
+
+    public static void main(String[] args) {
+        SpringApplication.run(Application.class, args);
+    }
+}
+```
+
+在业务方法添加 @Cacheable 注解：
+
+```java
+@Cacheable(cacheNames = {"task"})
+public TaskInfoDTO getTask(String taskId) {
+    log.info("TestBuzz.getTask mock query from DB......");
+    TaskInfoDTO taskInfoDTO = new TaskInfoDTO();
+    taskInfoDTO.setTaskId(taskId);
+    taskInfoDTO.setApplicantId("system");
+    taskInfoDTO.setDescription("test");
+    return taskInfoDTO;
+}
+```
+
+
+
 ## 配置 CacheManager 与 Cache
 
-由于是 SpringFramework 的内置功能，使用 SpringCache 并不需要额外引入jar包。并且只需要简单的配置，就可以启用==开箱即用的默认缓存==实现。
-
-创建 `Configuration` 类，在其中配置 `CacheManager Bean`，并为其创建两个 cache（注意cache的名称，在下面需要缓存的方法上打注释配置时需要指定）：
+创建 `Configuration` 类，在其中配置 `CacheManager Bean`，并为其创建两个 cache（注意 cache 的名称，在下面需要缓存的方法上打注释配置时需要指定）：
 
 ```java
 @Configuration
 @EnableCaching(proxyTargetClass = true)
-public class Configuration{
+public class Configuration {
 	@Bean(name="simpleCacheManager")
-	public CacheManager simpleCacheManager(){
+	public CacheManager simpleCacheManager() {
 		SimpleCacheManager cacheManager = new SimpleCacheManager();
 		List<Cache> caches = new ArrayList<Cache>();
 		ConcurrentMapCache cache1 = new ConcurrentMapCache("mycache");
@@ -644,7 +683,10 @@ public @interface EnableCaching {
 }
 ```
 
-其中`proxyTargetClass`表示：当需要代理的类是一个==接口==或者是一个==动态生成的代理类==时使用`JdkProxy`代理；而当要代理的类是一个==具体类==时，使用`cglib`来代理。
+其中`proxyTargetClass`表示：
+
+- 当需要代理的类是一个==接口==或者是一个==动态生成的代理类==时使用`JdkProxy`代理；
+- 而当要代理的类是一个==具体类==时，使用`Cglib`来代理。
 
 假如不设置该属性，则默认使用`JdkProxy`代理，而<font color=red>`JdkProxy`能够代理的类必须实现接口</font>，因此如果想要一个没实现接口的类被代理，就必须设置`proxyTargetClass = true`来使用`cglib`完成代理。
 
@@ -960,6 +1002,249 @@ public CacheManager myCacheManager(){
 }
 ```
 
+# SpringCache 原理初探[^7]
+
+CacheManager 存储了所有的 Cache 对象，因此，需要考虑两个问题：
+
+1. Cache 什么时候被 CacheManager 存储？
+2. 存储 Cache 时，是否可以增强 Cache 功能？
+
+## SpringCache 结构与流程
+
+缓存抽象不提供实际的存储，而是依赖于`org.springframework.cache.Cache`和`org.springframework.cache.CacheManager`接口实现抽象，SpringCache 的缓存架构如图所示：
+
+![SpringCache 的缓存架构](SpringBootNotesPictures/SpringCache 的缓存架构.png)
+
+**Spring Cache 流程**：
+
+1. <font color=red>项目启动加载 bean 时，解析缓存注解，创建代理对象</font>。
+2. <font color=red>调用方法时，直接调用代理对象，在代理方法中获取到指定的 CacheManager 对象</font>。
+3. <font color=red>根据注解的 cacheNames 属性，在 CacheManager 中获取到 Cache 对象，然后调用`org.springframework.cache.Cache`中的方法对缓存数据进行操作</font>。
+
+## 自定义实现 CacheManager
+
+自定义实现 CacheManager 对象，可以参考`org.springframework.data.redis.cache.RedisCacheManager`类，类继承结构如图所示：
+
+<img src="SpringBootNotesPictures/RedisCacheManager.png" alt="RedisCacheManager" style="zoom:50%;" />
+
+### AbstractCacheManager 定义算法骨架
+
+`AbstractCacheManager`是`CacheManager`的子类。**定义了管理 Cache 的骨架算法**，自定义的 CacheManager 继承`org.springframework.cache.support.AbstractCacheManager`类后，只需要实现其中的钩子方法。
+
+AbstractCacheManager 方法如图所示：
+
+![AbstractCacheManager 方法](SpringBootNotesPictures/AbstractCacheManager 方法.png)
+
+| 属性       | 作用                                                    |
+| :--------- | :------------------------------------------------------ |
+| cacheMap   | ConcurrentMap<String, Cache>类型，用于缓存 Cache 对象。 |
+| cacheNames | `Set<String>`类型，用于缓存 CacheNames                  |
+
+| 方法               | 作用                                                         |
+| ------------------ | ------------------------------------------------------------ |
+| getCache           | 模板方法（已定义算法逻辑），子类需实现`getMissingCache`和`decorateCache`钩子方法。<br>目的：将 Cache 放入 cacheMap 中，获取 Cache 对象。 |
+| getCacheNames      | 获取`CacheNames`的集合。                                     |
+| afterPropertiesSet | bean对象初始化方法，实际调用`initializeCaches()`方法。       |
+| decorateCache      | 钩子方法（需要子类实现），装饰`Cache`对象。                  |
+| getMissingCache    | 钩子方法（需要子类实现），若`CacheManager`不存在`Cache`对象时的处理策略。 |
+| initializeCaches   | 模板方法，包含`loadCaches`方法，将 Caches 集合读取到缓存中。 |
+| loadCaches         | 抽象钩子方法（需要子类实现），加载配置中参数，创建Caches 集合。 |
+| lookupCache        | 根据 key 获取 Cache 对象。                                   |
+| updateCacheNames   | 私有方法，更新 CacheNames 集合。                             |
+
+### AbstractTransactionSupportingCacheManager—实现事务支持
+
+`AbstractTransactionSupportingCacheManager`类重写了`AbstractCacheManager#decorateCache`的方法，对 Cache 对象的功能进行加强，使其支持事务。
+
+将 Cache 对象保存到 CacheManager 中时，调用子类实现的 decorateCache 方法对 Cache 对象功能进行加强。若`transactionAware==true`，返回支持事务的 Cache 对象，否则返回普通的 Cache 对象：
+
+```java
+public abstract class AbstractTransactionSupportingCacheManager extends AbstractCacheManager {
+    private boolean transactionAware = false;
+
+    public AbstractTransactionSupportingCacheManager() {
+    }
+
+    public void setTransactionAware(boolean transactionAware) {
+        this.transactionAware = transactionAware;
+    }
+
+    public boolean isTransactionAware() {
+        return this.transactionAware;
+    }
+
+    protected Cache decorateCache(Cache cache) {
+        return (Cache)(this.isTransactionAware() ? new TransactionAwareCacheDecorator(cache) : cache);
+    }
+}
+```
+
+`TransactionAwareCacheDecorator`装饰 Cache 对象，重写 put、evict 和 clear 方法。只有事务真正提交，才会保存到缓存中：
+
+```java
+public void put(final Object key, @Nullable final Object value) {
+    if (TransactionSynchronizationManager.isSynchronizationActive()) {
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            public void afterCommit() {
+                TransactionAwareCacheDecorator.this.targetCache.put(key, value);
+            }
+        });
+    } else {
+        this.targetCache.put(key, value);
+    }
+
+}
+```
+
+### RedisCacheManager
+
+RedisCacheManager 虽继承自`CacheManager`接口，但在`AbstractCacheManager`中重写了`getCache(String)`等方法逻辑。而子类只需要实现`loadCaches`、`getMissingCache`方法。
+
+#### loadCaches
+
+loadCaches：加载配置中 Cache 对象集合，**强制实现**。
+
+`AbstractCacheManager#afterPropertiesSet`方式是在构造方法之后，init 方法之前执行，完成类的初始化操作：
+
+```java
+@Override
+public void afterPropertiesSet() {
+    initializeCaches();
+}
+
+public void initializeCaches() {
+    Collection<? extends Cache> caches = loadCaches();
+
+    synchronized (this.cacheMap) {
+        this.cacheNames = Collections.emptySet();
+        this.cacheMap.clear();
+        Set<String> cacheNames = new LinkedHashSet<>(caches.size());
+        for (Cache cache : caches) {
+            String name = cache.getName();
+            this.cacheMap.put(name, decorateCache(cache));
+            cacheNames.add(name);
+        }
+        this.cacheNames = Collections.unmodifiableSet(cacheNames);
+    }
+}
+```
+
+**子类必须重写`AbstractCacheManager#loadCaches`方法**，<font color=red>读取配置文件的参数</font>，构建对应的`XxxCache`对象集合，在`AbstractCacheManager#initializeCaches`方法中将 Cache 集合保存到 cacheMap 中。
+
+子类的 loadCaches 方法可以返回空集合，但是不能返回 null。
+
+在 RedisCacheManager 中，我们可以在配置文件中加载（不同配置的）Cache对象（例如：Cache1 设置 60s 的超时时间，Cache2 设置 30s 超时时间)，**从而解决 Spring Cache 无法设置过期时间的缺陷！**
+
+```java
+protected Collection<RedisCache> loadCaches() {
+    List<RedisCache> caches = new LinkedList();
+    // initialCacheConfiguration：配置文件中参数
+    Iterator var2 = this.initialCacheConfiguration.entrySet().iterator();
+
+    while(var2.hasNext()) {
+        Entry<String, RedisCacheConfiguration> entry = (Entry)var2.next();
+        // entry.getKey()：创建RedisCache对象
+        caches.add(this.createRedisCache((String)entry.getKey(), (RedisCacheConfiguration)entry.getValue()));
+    }
+
+    return caches;
+}
+```
+
+#### decorateCache
+
+decorateCache，装饰 Cache 对象，**选择性实现**！
+
+`AbstractCacheManager#decorateCache`作用就是装饰 Cache 对象，加强功能。实际上 Cache 对象中定义了对缓存的增改删查等操作。
+
+#### getMissingCache
+
+处理不存在的缓存，**必须实现**！
+
+在 CacheManager 增加缓存的方法实际上有两种，一种是读取配置文件中的 Cache 配置列表；另一种是在获取 Cache 对象时，若不存在便创建Cache对象，并将其放入到`cacheMap`中：
+
+```java
+// AbstractCacheManager
+@Override
+@Nullable
+public Cache getCache(String name) {
+    // Quick check for existing cache...
+    Cache cache = this.cacheMap.get(name);
+    if (cache != null) {
+        return cache;
+    }
+
+    // The provider may support on-demand cache creation...
+    Cache missingCache = getMissingCache(name);
+    if (missingCache != null) {
+        // Fully synchronize now for missing cache registration
+        synchronized (this.cacheMap) {
+            cache = this.cacheMap.get(name);
+            if (cache == null) {
+                cache = decorateCache(missingCache);
+                this.cacheMap.put(name, cache);
+                updateCacheNames(name);
+            }
+        }
+    }
+    return cache;
+}
+```
+
+`AbstractCacheManager#getMissingCache`方法是一个具体的钩子方法，默认返回null。子类`RedisCacheManager#getMissingCache`中重写了该方法。根据`allowInFlightCacheCreation`属性来决定是否构建Cache对象：
+
+```java
+protected RedisCache getMissingCache(String name) {
+    return this.allowInFlightCacheCreation ? this.createRedisCache(name, this.defaultCacheConfig) : null;
+}
+```
+
+如果`getMissingCache`方法返回null，即CacheManager中不存在对应的Cache对象，SpringCache会抛出异常。
+
+## 创建自定义Cache
+
+实际上 RedisCacheManager 中存储的是 RedisCache 对象。
+
+创建缓存 Cache 对象的方法主要有两种：
+
+- 一种是在初始化中读取配置文件配置；
+- 一种是发现不存在时创建。
+
+但是都是调用了`RedisCacheManager#createRedisCache`方法：
+
+```java
+protected RedisCache createRedisCache(String name, @Nullable RedisCacheConfiguration cacheConfig) {
+    // name：缓存名；cacheWriter：缓存操作类；cacheConfig：缓存配置
+    return new RedisCache(name, this.cacheWriter, cacheConfig != null ? cacheConfig : this.defaultCacheConfig);
+}
+```
+
+### RedisCache 的配置
+
+可以在配置文件中对`org.springframework.data.redis.cache.RedisCacheConfiguration`（不是`org.springframework.boot.autoconfigure.cache`中的`RedisCacheConfiguration`）属性进行配置，也就是对 Redis 进行配置：
+
+```java
+public class RedisCacheConfiguration {
+    // 设置超时时间
+    private final Duration ttl;
+    // 是否缓存为null
+    private final boolean cacheNullValues;
+    // key的前缀
+    private final CacheKeyPrefix keyPrefix;
+    // 是否使用前缀
+    private final boolean usePrefix;
+    // key序列化方式
+    private final SerializationPair<String> keySerializationPair;
+    // value序列化方式
+    private final SerializationPair<Object> valueSerializationPair;
+    // z
+    private final ConversionService conversionService;
+    .....
+}
+```
+
+
+
 
 
 # 参考资料
@@ -970,6 +1255,7 @@ public CacheManager myCacheManager(){
 [^4]:[基于Spring Cache实现分布式二级缓存](https://mp.weixin.qq.com/s/2hoDTGd07NtjG5Vanq5wYw)
 [^5]:[实战 Spring Cache](https://mp.weixin.qq.com/s/Jab1erOqAVVuYli8sR_RjA)
 [^6]:[SpringCache实现原理及核心业务逻辑（一）_不动明王1984的博客-CSDN博客_springcache](https://blog.csdn.net/m0_37962779/article/details/78671468)
+[^7]:[CacheManager源码](https://www.jianshu.com/p/ef8fb285ed72)
 
 [SpringBoot基础系列-SpringCache使用](https://www.jianshu.com/p/6db623355e11)
 
