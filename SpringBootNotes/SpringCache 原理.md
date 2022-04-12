@@ -4,7 +4,7 @@ typora-copy-images-to: SpringBootNotesPictures
 
 # SpringCache 实现原理
 
-SpringCache 使用 Spring AOP 来实现，当我们在 Configuration 类打上 @EnableCaching 注释时，该标注通过 `ImportSelector` 机制启动 `AbstractAdvisorAutoProxyCreator` 的一个实例，该实例本身是一个 Ordered BeanPostProcessor，<font color=red>BeanPostProcessor 的作用是在 bean 创建、初始化的前后对其进行一些额外的操作（包括创建代理）</font>。因此可以认为当在 Configuration 类打上 @EnableCaching 注释时，做的第一件事情就是启用 Spring AOP 机制。
+SpringCache 使用 Spring AOP 来实现，当我们在 Configuration 类打上 @EnableCaching 注释时，该标注通过 `ImportSelector` 机制启动 `AbstractAdvisorAutoProxyCreator` 的一个实例，该实例本身是一个 Ordered BeanPostProcessor，<font color=red>BeanPostProcessor 的作用是在 bean 创建、初始化的前后对其进行一些额外的操作（包括创建代理）</font>。而Spring AOP就是通过AbstractAdvisorAutoProxyCreator来实现的。因此可以认为当在 Configuration 类打上 @EnableCaching 注释时，做的第一件事情就是启用 Spring AOP 机制。
 
 SpringCache 使用 Spring AOP 面向切面编程的机制来实现，当我们在 Configuration 类打上 @EnableCaching 注释时，除了启动 Spring AOP 机制外，引入的另一个类 `ProxyCachingConfiguration` 就是 SpringCache 具体实现相关 bean 的配置类。
 
