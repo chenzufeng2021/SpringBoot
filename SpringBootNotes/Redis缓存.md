@@ -507,7 +507,97 @@ public class UserService {
 
 ```
 
+# SpringBoot 整合 Redisson
 
+## 引入依赖
+
+```xml
+<dependencies>
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+
+    <!-- redisson-spring-boot-starter 引入了data-redis依赖
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-data-redis</artifactId>
+    </dependency>-->
+
+    <dependency>
+        <groupId>org.redisson</groupId>
+        <artifactId>redisson-spring-boot-starter</artifactId>
+        <version>3.17.0</version>
+    </dependency>
+</dependencies>
+```
+
+## RedissonConfig
+
+```java
+import org.redisson.Redisson;
+import org.redisson.api.RedissonClient;
+import org.redisson.config.Config;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.data.redis.RedisProperties;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+/**
+ * @author chenzufeng
+ * @date 2022/4/14
+ */
+@Configuration
+public class RedissonConfig {
+    @Autowired
+    private RedisProperties redisProperties;
+
+    @Bean
+    public RedissonClient redissonClient() {
+        Config config = new Config();
+        String redisUrl = String.format("redis://%s:%s", redisProperties.getHost(), redisProperties.getPort());
+        config.useSingleServer().setAddress(redisUrl);
+        return Redisson.create(config);
+    }
+}
+```
+
+## controller
+
+```java
+@RestController
+@RequestMapping("/redisson")
+public class RedissonController {
+    @Autowired
+    private StringRedisTemplate stringRedisTemplate;
+
+    @GetMapping("/save")
+    public void save() {
+        stringRedisTemplate.opsForValue().set("key", "value");
+    }
+
+    @GetMapping("/get")
+    public String get() {
+        return stringRedisTemplate.opsForValue().get("key");
+    }
+}
+```
+
+## redis 配置
+
+```properties
+spring.redis.host=localhost
+spring.redis.port=6379
+spring.redis.database=0
+```
+
+https://github.com/redisson/redisson/wiki/14.-Integration-with-frameworks
+
+https://appapi.w3cschool.cn/article/41601219.html
+
+https://springboot.io/t/topic/1250
+
+[(43条消息) SpringBoot cache 集成 redisson_往日时光--的博客-CSDN博客_redissonclient](https://blog.csdn.net/qq_44605317/article/details/106940677)
 
 # 参考资料
 
