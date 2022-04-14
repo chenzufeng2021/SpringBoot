@@ -2,6 +2,7 @@
 typora-copy-images-to: SpringBootNotesPictures
 
 
+
 ---
 
 # SpringCache 实现原理[^4]
@@ -69,7 +70,7 @@ public @interface EnableCaching {
 }
 ```
 
-这个注解和@EnableAsync注解特别像，说明都是基于==Aop和代理==做了能力增强，该类导入了 `CachingConfigurationSelector` 类，<font color=red>它完成了一件事：向容器内注入了`AutoProxyRegistrar`和`ProxyCachingConfiguration`这两个Bean</font>：
+这个注解和 @EnableAsync 注解特别像，说明都是基于==Aop和代理==做了能力增强，该类导入了 `CachingConfigurationSelector` 类，<font color=red>它完成了一件事：向容器内注入了`AutoProxyRegistrar`和`ProxyCachingConfiguration`这两个Bean</font>：
 
 ```java
 public class CachingConfigurationSelector extends AdviceModeImportSelector<EnableCaching> {
@@ -122,7 +123,7 @@ public class CachingConfigurationSelector extends AdviceModeImportSelector<Enabl
 }
 ```
 
-CachingConfigurationSelector 类的核心是 `selectImports` 方法，根据 @EnableCaching 配置的模式，选择不同的配置类型，默认是PROXY模式，导入 `AutoProxyRegistrar` 和 `ProxyCachingConfiguration` 两个配置。
+CachingConfigurationSelector 类的核心是 `selectImports` 方法，根据 @EnableCaching 配置的模式，选择不同的配置类型，==默认是 PROXY 模式==，导入 `AutoProxyRegistrar` 和 `ProxyCachingConfiguration` 两个配置。
 
 
 
@@ -556,16 +557,92 @@ private Collection<CacheOperation> parseCacheAnnotations(SpringCacheAnnotationPa
 
 
 
+该方法中使用 Spring Core 模块的`AnnotatedElementUtils`来得到标注到可被标注对象（在这里包括类和方法）上的指定类型的注释，包括了注释上再打注释等层级结构以及层级属性的合并操作。
+
+整体逻辑是，首先获得标注在方法上的 @Cacheable 注释集合，并对其中的每个注释调用：
+
+```java
+private CacheableOperation parseCacheableAnnotation(
+        AnnotatedElement ae, DefaultCacheConfig defaultConfig, Cacheable cacheable) {
+
+    CacheableOperation.Builder builder = new CacheableOperation.Builder();
+
+    builder.setName(ae.toString());
+    builder.setCacheNames(cacheable.cacheNames());
+    builder.setCondition(cacheable.condition());
+    builder.setUnless(cacheable.unless());
+    builder.setKey(cacheable.key());
+    builder.setKeyGenerator(cacheable.keyGenerator());
+    builder.setCacheManager(cacheable.cacheManager());
+    builder.setCacheResolver(cacheable.cacheResolver());
+    builder.setSync(cacheable.sync());
+
+    defaultConfig.applyDefault(builder);
+    CacheableOperation op = builder.build();
+    validateCacheOperation(ae, op);
+
+    return op;
+}
+```
+
+利用`CacheableOperation.Builder`来构建一个`CacheableOperation`，并添加到`Collection<CacheOperation> ops`中。
+
+接下来对 @CacheEvict 和 @CachePut 也执行同样的操作，区别是它们分别使用 CacheEvictOperation.Builder 和 CachePutOperation.Builder 来构建 CacheEvictOperation 和 CachePutOperation。
+
+另外对于 @Caching，调用：
+
+```java
+private void parseCachingAnnotation(
+        AnnotatedElement ae, DefaultCacheConfig defaultConfig, Caching caching, Collection<CacheOperation> ops) {
+
+    Cacheable[] cacheables = caching.cacheable();
+    for (Cacheable cacheable : cacheables) {
+        ops.add(parseCacheableAnnotation(ae, defaultConfig, cacheable));
+    }
+    CacheEvict[] cacheEvicts = caching.evict();
+    for (CacheEvict cacheEvict : cacheEvicts) {
+        ops.add(parseEvictAnnotation(ae, defaultConfig, cacheEvict));
+    }
+    CachePut[] cachePuts = caching.put();
+    for (CachePut cachePut : cachePuts) {
+        ops.add(parsePutAnnotation(ae, defaultConfig, cachePut));
+    }
+}
+```
+
+其中对 caching 的 cacheable、evict 及 put 属性对应的各组 @Cacheable、@CacheEvict 及 @CachePut 注释分别调用前面介绍的执行逻辑来构建相应的 CacheOperation 并添加到`Collection<CacheOperation> ops`中，然后将其返回。
+
+当首次调用某方法执行上述的解析操作后，AnnotationCacheOperationSource会将其缓存起来，后续再调用该方法时会直接从缓存中得到该方法对应的`Collection<CacheOperation> ops`以增加效率。
+
+
+
 总结：
 
 - 首先查找该类、方法上的 Cacheable 注解并进行合并。
 
 - 针对合并后的每个 Cacheable 创建对应的 CacheableOperation；然后同样逻辑执行 CacheEvict 和 CachePut。
-- 最后处理Caching，Caching 表示的是若干组 Cache 标注的集合，将其解析成一组 CacheOperation 并添加到`Collection<CacheOperation> ops`中。
+- 最后处理 Caching，Caching 表示的是若干组 Cache 标注的集合，将其解析成一组 CacheOperation 并添加到`Collection<CacheOperation> ops`中。
 
 
 
-## CacheInterceptor
+## CacheInterceptor-缓存拦截器
+
+CacheInterceptor 是缓存真正执行的核心！
+
+
+
+对添加了 Cache 相关注释的类，在创建其 bean 的时候已经由 Spring AOP 为其创建==代理增强==，并将 BeanFactoryCacheOperationSourceAdvisor ==加入其代理中==。
+
+ 当调用其方法的时候，会通过代理执行到 BeanFactoryCacheOperationSourceAdvisor 定义的==切面==。该切面是一个 PointcutAdvisor，在 Spring AOP 底层框架 DefaultAdvisorChainFactory.getInterceptorsAndDynamicInterceptionAdvice 方法中使用：
+
+ ```java
+pointcutAdvisor.getPointcut().getMethodMatcher().matches(method, targetClass))
+ ```
+
+
+来判断被调用方法是否匹配切点逻辑，如果匹配就执行其拦截器中的逻辑，BeanFactoryCacheOperationSourceAdvisor 中注册的拦截器是 CacheInterceptor[^1]。
+
+
 
 Spring 注册缓存管理器后，会对需要缓存方法对应的类进行 AOP 处理，核心逻辑为自定了一个`MethodInterceptor`拦截器`org.springframework.cache.interceptor.CacheInterceptor`，该拦截器会将方法调用转到`CacheAspectSupport.execute()`中。
 
@@ -592,6 +669,7 @@ public class CacheInterceptor extends CacheAspectSupport implements MethodInterc
         };
 
         try {
+            // 真正地去处理缓存操作的执行，很显然这是父类CacheAspectSupport的方法
             return this.execute(aopAllianceInvoker, invocation.getThis(), method, invocation.getArguments());
         } catch (ThrowableWrapper var5) {
             throw var5.getOriginal();
@@ -602,16 +680,23 @@ public class CacheInterceptor extends CacheAspectSupport implements MethodInterc
 
 当拦截到调用时，将调用封装成 `CacheOperationInvoker` 并交给父类执行，父类 `CacheAspectSupport` 实现了 `SmartInitializingSingleton` 接口，在单例初始化后容器会调用 `afterSingletonsInstantiated` 方法[^2]。
 
+这个类本身的实现很少，主要逻辑都在他的抽象父类：`CacheAspectSupport`。
 
+即，Spring AOP 底层调用该方法时，传递来的参数 `MethodInvocation invocation` 是一个把调用方法 method 与其对应的切面拦截器 interceptors 组装成类似于 ChainFilter 一样的结构。CacheOperationInvoker 回调接口的意义是，将决定切面逻辑与实际调用方法顺序的权利转交给 CacheAspectSupport 的 execute 方法[^1]。
 
-### CacheAspectSupport
+### CacheAspectSupport-缓存执行的核心
 
 ```java
+// CacheAspectSupport
+// 这个来自于接口：SmartInitializingSingleton，在实例化完所有单例Bean后调用
 public void afterSingletonsInstantiated() {
+    // 若没有给这个切面手动设置cacheResolver  那就去拿CacheManager
+    // 【注意】这就是为何我们只需要把CacheManager配进容器里即可，就自动会设置在切面里了
     if (this.getCacheResolver() == null) {
         Assert.state(this.beanFactory != null, "CacheResolver or BeanFactory must be set on cache aspect");
 
         try {
+            // 这个方法实际上是把CacheManager包装成了一个SimpleCacheResolver
             this.setCacheManager((CacheManager)this.beanFactory.getBean(CacheManager.class));
         } catch (NoUniqueBeanDefinitionException var2) {
             throw new IllegalStateException("No CacheResolver specified, and no unique bean of type CacheManager found. Mark one as primary or declare a specific CacheManager to use.");
@@ -630,20 +715,21 @@ public void afterSingletonsInstantiated() {
 
 继续看`CacheAspectSupport.execute`：
 
-这个增强逻辑的核心功能是在 `CacheAspectSupport` 中实现的，Spring 注册缓存管理器后，会对需要缓存方法对应的类进行 AOP 处理，核心逻辑为自定了一个`MethodInterceptor`拦截器`org.springframework.cache.interceptor.CacheInterceptor`，该拦截器会将方法调用转到`CacheAspectSupport.execute()`中：
-
 首先调用`AnnotationCacheOperationSource.getCacheOperations(method, targetClass)`方法得到被调用方法的`Collection<CacheOperation>`；
 
 然后<font color=red>将这些 CacheOperation 以及被调用方法、调用参数、目标类、相应的 Cache 信息统统封装到 CacheOperationContext 里</font>，随后调用真正的核心方法。
 
 ```java
+// 父类最为核心的方法，真正执行目标方法 + 缓存操作
 @Nullable
 protected Object execute(CacheOperationInvoker invoker, Object target, Method method, Object[] args) {
+    // 如果已经表示初始化过了(有CacheManager，CacheResolver了)，执行这里
     if (this.initialized) {
         Class<?> targetClass = this.getTargetClass(target);
         CacheOperationSource cacheOperationSource = this.getCacheOperationSource();
         if (cacheOperationSource != null) {
             // 得到被调用方法的Collection<CacheOperation>
+            // 简单的说就是拿到该方法上所有的CacheOperation缓存操作，最终一个一个的执行
             Collection<CacheOperation> operations = cacheOperationSource.getCacheOperations(method, targetClass);
             if (!CollectionUtils.isEmpty(operations)) {
                 // 将这些 CacheOperation 以及被调用方法、调用参数、目标类、相应的 Cache 信息统统封装到 CacheOperation 上下文里
@@ -670,6 +756,7 @@ private class CacheOperationContexts {
         this.contexts = new LinkedMultiValueMap(operations.size());
         Iterator var7 = operations.iterator();
 
+        // 为每个operation分别创建CacheOperationContext
         while(var7.hasNext()) {
             CacheOperation op = (CacheOperation)var7.next();
             this.contexts.add(op.getClass(), CacheAspectSupport.this.getOperationContext(op, method, args, target, targetClass));
@@ -680,7 +767,20 @@ private class CacheOperationContexts {
 }
 ```
 
+为每个 operation 分别创建 CacheOperationContext：
+
 #### CacheAspectSupport#CacheOperationContext
+
+```java
+protected CacheAspectSupport.CacheOperationContext getOperationContext(CacheOperation operation, Method method, Object[] args, Object target, Class<?> targetClass) {
+    CacheAspectSupport.CacheOperationMetadata metadata = this.getCacheOperationMetadata(operation, method, targetClass);
+    return new CacheAspectSupport.CacheOperationContext(metadata, args, target);
+}
+```
+
+获取 `CacheOperationMetadata metadata` 时的较重要的动作就是获取 CacheOperation 中用 String 名称定义的 CacheResolver 和 KeyGenerator 的 bean。
+
+然后在创建 CacheOperationContext 时使用 CacheResolver bean 获得 cache 的信息：
 
 ```java
 protected class CacheOperationContext implements CacheOperationInvocationContext<CacheOperation> {
@@ -716,7 +816,7 @@ protected Collection<? extends Cache> getCaches(CacheOperationInvocationContext<
 
 #### AbstractCacheResolver-getCacheManager
 
-Cache 解析器，用于根据实际情况来动态解析使用哪个 Cache。
+Cache 解析器，用于根据实际情况来动态解析使用哪个 Cache。具体实现，根据调用上下文提供缓存名称集合。
 
 ```java
 public abstract class AbstractCacheResolver implements CacheResolver, InitializingBean {
@@ -752,6 +852,16 @@ public abstract class AbstractCacheResolver implements CacheResolver, Initializi
 }
 ```
 
+
+
+在创建完上下文 CacheOperationContexts 后，调用 SpringCache 真正的核心业务逻辑：
+
+```java
+private Object execute(final CacheOperationInvoker invoker, Method method, CacheOperationContexts contexts)
+```
+
+
+
 #### execute
 
 将每个操作包装对应上下文映射关系，并检查是否是同步操作（@Cacheable独有属性）。这个方法可以看做是处理 @Cacheable、@CachePut、@CacheEvict、@Caching 这些注解的方法。
@@ -785,26 +895,35 @@ private Object execute(CacheOperationInvoker invoker, Method method, CacheAspect
         }
     }
 
-    // 删除操作
+    // 删除操作：【判断是否需要在方法调用前，执行缓存清除】
     // 2、被@CacheEvict注解，且属性beforeInvocation = true，表示需要在调用前执行清除缓存
+    // 最先处理@CacheEvict注解，真正执行的方法请参见：【performCacheEvict】
+    // context.getCaches()拿出所有的caches，看看是执行cache.evict(key);方法还是cache.clear()
     this.processCacheEvicts(contexts.get(CacheEvictOperation.class), true, CacheOperationExpressionEvaluator.NO_RESULT);
     
-    // 3、从Contexts获取是否有@Cacheable注解。如果有的话就去找缓存，如果缓存中存在对应数据就返回，不存在就返回null；如果没有此注解就返回null
-    // cacheHit这个对象代表，是否存在key对应的缓存
+    // 3、【检查是否能得到一个符合条件的缓存值】从Contexts获取是否有@Cacheable注解。如果有的话就去找缓存，如果缓存中存在对应数据就返回，不存在就返回null；如果没有此注解就返回null
+    // cacheHit这个对象代表，是否存在key对应的缓存，调用了【cache.get(key)】
+    // 执行@Cacheable，看看缓存是否能够命中
     ValueWrapper cacheHit = this.findCachedItem(contexts.get(CacheableOperation.class));
+    
+    // 【如果缓存没有命中，那就准备一个cachePutRequest】，因为@Cacheable首次进来肯定命中不了，最终肯定是需要执行一次put操作的
     // 如果缓存为空的话，SpringCache会将@Cacheable自动降级为@CachePut，用于之后增加缓存。
     // 可以理解为缓存的添加是由CachePut维护的，@Cacheable的查询和增添功能是被分隔开的。
     List<CacheAspectSupport.CachePutRequest> cachePutRequests = new LinkedList();
     if (cacheHit == null) {
         // 如果被@Cacheable标记，则需要将返回结果缓存，收集起来
+        // 此时方法尚未执行，因为第二个参数为NO_RESULT，意思是当前上下文中#result不存在
         this.collectPutRequests(contexts.get(CacheableOperation.class), CacheOperationExpressionEvaluator.NO_RESULT, cachePutRequests);
     }
 
+    // 【判断返回缓存值，还是实际调用方法的结果】
     // 用于作为methods返回值的对象
     Object returnValue;
     // 用于对缓存操作（增加）的对象
     Object cacheValue;
+    
     // 4、如果cache存在，并且不是个CachePut（更新请求），就是用上面查到的缓存Cachehit进行赋值
+    // 如果缓存命中了，并且没有@CachePut的话，也就直接返回了
     if (cacheHit != null && !this.hasCachePut(contexts)) {
         cacheValue = cacheHit.get();
         returnValue = this.wrapCacheValue(method, cacheValue);
@@ -815,16 +934,20 @@ private Object execute(CacheOperationInvoker invoker, Method method, CacheAspect
     }
 
     // 5、判断是否有@CachePut请求，如果有的就加入一个请求更新链
+    // 收集符合条件的@CachePut定义的CachePutRequest，并添加到上面的cachePutRequests中
     this.collectPutRequests(contexts.get(CachePutOperation.class), cacheValue, cachePutRequests);
     Iterator var8 = cachePutRequests.iterator();
 
     // 如果有需要被放入缓存的数据信息,那么就将其放入缓存
+    // 【执行CachePutRequest将符合条件的数据写入缓存】
     while(var8.hasNext()) {
         CacheAspectSupport.CachePutRequest cachePutRequest = (CacheAspectSupport.CachePutRequest)var8.next();
+        // 最终执行cache.put(key, result);方法
+        // 对于上面收集到的cachePutRequests，逐个调用其apply(cacheValue)方法
         cachePutRequest.apply(cacheValue);
     }
 
-    // 6、后置缓存删除操作
+    // 6、后置缓存删除操作：【判断是否需要在方法调用后执行缓存清除】
     // 被@CacheEvict注解, 且属性beforeInvocation = false, 则在方法调用后执行清除缓存
     this.processCacheEvicts(contexts.get(CacheEvictOperation.class), false, cacheValue);
     return returnValue;
@@ -836,14 +959,23 @@ private Object execute(CacheOperationInvoker invoker, Method method, CacheAspect
 - 首先检查是否是同步操作（@Cacheable特性）。
   - 如果是且满足条件，调用缓存获取逻辑并返回；
   - 否则返回业务逻辑免缓存调用 invokeOperation。
-- 然后执行 @CacheEvict 的前置清除（beforeInvocation=true）。
-- 接着检查 @Cacheable 是否命中缓存：如果没有命中则放入需要执行 CachePutRequest 列表暂存。
-- 然后检查是否缓存命中且没有需要更新的缓存：
-  - 如果满足则返回结果，使用缓存结果。否则使用业务查询结果作为返回结果，并且填充需要缓存的结果。
-- 然后收集 @CachePut 操作，把 @CachePut 和 @Cacheable 未命中的请求同步到缓存。
-- 最后清理 @CacheEvict 的缓存（beforeInvocation=false）。
+- 接着执行 @CacheEvict（如果`beforeInvocation=true`且 condition 通过），如果`allEntries=true`，则清空所有；
+- 然后收集 @Cacheable 并检查是否能得到一个符合条件的缓存值：如果 @Cacheable 的 condition 通过，并且 key 对应的数据不在缓存中，就创建一个 CachePutRequest 实例放入 cachePutRequests 中； 
+- 如果得到了缓存值并且 cachePutRequests 为空，并且没有符合条件的 @CachePut 操作，那么将`returnValue=缓存数据`；如果没有找到缓存，那么实际执行方法调用，并把返回结果放入returnValue；
+- 收集符合条件的 @CachePut 操作（此时是方法执行后，condition 上下文中 #result 可用)，并放入 cachePutRequests ；
+- 执行 cachePutRequests，将数据写入缓存（unless 为空，或者 unless 解析结果为false）；
+- 执行 @CacheEvict（如果`beforeInvocation=false`且`condition`通过），如果`allEntries=true`，则清空所有。
 
 上边的 doGet、doPut等操作都定义在`org.springframework.cache#Cache`接口中，有很多实现。如`ConcurrentMapCache`、`EhCacheCache`、`RedisCache`等等，这些 Cache 中都自定义了自己的缓存实现。
+
+## 处理缓存注解的步骤总结[^8]
+
+1. CacheOperation 封装了 @CachePut、@Cacheable、@CacheEvict（下称三大缓存注解）的属性信息，以便于拦截的时候能直接操作此对象来执行逻辑；解析三大注解到 CacheOperation 的过程是由 CacheAnnotationParser 完成的；
+2. CacheAnnotationSource 代表==缓存属性源==，非常非常重要的一个概念。它提供接口方法来==获取目标方法的 CacheOperation 集合==。由上可知，这个具体工作是委托给 CacheAnnotationParser 去完成的；
+3. BeanFactoryCacheOperationSourceAdvisor 代表==增强器==，至于需要增强哪些类呢？就是看有没有存在 CacheOperation 属性的方法。
+4. CacheInterceptor 实现了 MethodInterceptor 接口，在 Spring AOP 中==实现对执行方法的拦截==。在调用 invoke 执行目标方法前后，通过 CacheAnnotationSource 获取到方法所有的缓存操作属性，从而一个个的执行。
+5. 执行的时候，每一个 CacheOperation 最后被封装成了 CacheOperationContext，而 CacheOperationContext 最终通过 CacheResolve r解析出缓存对象 Cache（可能是多个）。
+6. 最后，CacheInterceptor 调用其父类 AbstractCacheInvoker 执行对应的 doPut / doGet / doEvict / doClear 等等（可以处理执行异常）。
 
 
 
@@ -1188,6 +1320,25 @@ protected Object createProxy(Class<?> beanClass, @Nullable String beanName, @Nul
 
 ## BeanFactoryCacheOperationSourceAdvisor[^1]
 
+从名字就能看出它是一个增强器 Advisor，并且还和 BeanFactory 有关。
+
+由`ProxyCachingConfiguration`可知，这个增强器的切面 Advice 是 CacheInterceptor，并且持有 CacheOperationSource 的引用：
+
+```java
+public BeanFactoryCacheOperationSourceAdvisor cacheAdvisor() {
+    BeanFactoryCacheOperationSourceAdvisor advisor = new BeanFactoryCacheOperationSourceAdvisor();
+    advisor.setCacheOperationSource(this.cacheOperationSource());
+    advisor.setAdvice(this.cacheInterceptor());
+    if (this.enableCaching != null) {
+        advisor.setOrder((Integer)this.enableCaching.getNumber("order"));
+    }
+
+    return advisor;
+}
+```
+
+此 Adviso r的实现非常的简单，切点是 CacheOperationSourcePointcut，核心逻辑都依托于缓存属性源[^8]。
+
 bean 加载的时候，`BeanFactoryCacheOperationSourceAdvisor` 的 `getPointcut()` 也就是 `CacheOperationSourcePointcut` 就会被获取，然后调用 `CacheOperationSourcePointcut.matches()`方法，用来匹配对应的bean。假设 bean 在 `BeanFactoryCacheOperationSourceAdvisor`的扫描中 matchs() 方法返回了true，结果就是在<font color=red>每个 bean 的方法被调用的时候 CacheInterceptor 中的 invoke() 方法就会被调用</font>[^5]。
 
 即，它负责将`CacheInterceptor`与`CacheOperationSourcePointcut`结合起来。其内部注入了`AnnotationCacheOperationSource`，并创建了`CacheOperationSourcePointcut`：
@@ -1225,7 +1376,7 @@ public class BeanFactoryCacheOperationSourceAdvisor extends AbstractBeanFactoryP
 }
 ```
 
-`BeanFactoryCacheOperationSourceAdvisor`利用 Spring AOP 的面向切面机制，<font color=red>将配置了 SpringCache 相关注释的类进行代理增强，并加入到其 advisors 处理链中</font>。
+`BeanFactoryCacheOperationSourceAdvisor`利用 Spring AOP 的面向切面机制，<font color=red>将配置了 SpringCache 相关注释的类进行==代理增强==，并加入到其 advisors 处理链中</font>。
 
 在 bean 创建的时候，如果需要 Spring AOP 代理增强，会首先取出 beanFactory 中所有的 advisors，然后过滤出适合该 Bean 的advisors，加入到代理类中。
 
@@ -1681,591 +1832,18 @@ RedisAutoConfiguration 依赖 redis，并且导入了 LettuceConnectionConfigura
 
 
 
-# SpringCache 注解解析
-
-## AnnotationCacheOperationSource
-
-`AnnotationCacheOperationSource`的作用是<font color=red>对方法上的 Cache 注解进行解析，并将其转化为对应的 CacheOperation</font>。执行注释解析动作的时机是在第一次调用该方法的时候（并缓存解析结果供后面方法调用时使用）。
-
-AnnotationCacheOperationSource 内部持有一个`Set<CacheAnnotaionParser>`的集合，默认只包含一个 `SpringCacheAnnotationParser`。并使用 `CacheAnnotaionParser`来实现 `AbstractFallbackCacheOperationSource` 定义的两个抽象模板方法：
-
-```java
-public class AnnotationCacheOperationSource extends AbstractFallbackCacheOperationSource implements Serializable {
-    private final Set<CacheAnnotationParser> annotationParsers;
-    
-    public AnnotationCacheOperationSource() {
-        this(true);
-    }
-    
-    public AnnotationCacheOperationSource(boolean publicMethodsOnly) {
-        this.publicMethodsOnly = publicMethodsOnly;
-        this.annotationParsers = Collections.singleton(new SpringCacheAnnotationParser());
-    }
-    
-    @Override
-    @Nullable
-    protected Collection<CacheOperation> findCacheOperations(Class<?> clazz) {
-        return determineCacheOperations(parser -> parser.parseCacheAnnotations(clazz));
-    }
-
-    @Override
-    @Nullable
-    protected Collection<CacheOperation> findCacheOperations(Method method) {
-        return determineCacheOperations(parser -> parser.parseCacheAnnotations(method));
-    }
-    
-    @Nullable
-    protected Collection<CacheOperation> determineCacheOperations(CacheOperationProvider provider) {
-        Collection<CacheOperation> ops = null;
-        for (CacheAnnotationParser parser : this.annotationParsers) {
-            Collection<CacheOperation> annOps = provider.getCacheOperations(parser);
-            if (annOps != null) {
-                if (ops == null) {
-                    ops = annOps;
-                }
-                else {
-                    Collection<CacheOperation> combined = new ArrayList<>(ops.size() + annOps.size());
-                    combined.addAll(ops);
-                    combined.addAll(annOps);
-                    ops = combined;
-                }
-            }
-        }
-        return ops;
-    }
-    
-    @FunctionalInterface
-    protected interface CacheOperationProvider {
-        @Nullable
-        Collection<CacheOperation> getCacheOperations(CacheAnnotationParser parser);
-    }
-}
-```
-
-该实现中使用回调模式，用`Set<CacheAnnotaionParser>`中的每一个 CacheAnnotaionParser 去解析一个方法或类，然后将得到的`List<CacheOperation>`合并，最终返回。
-
-## SpringCacheAnnotationParser
-
-如上面代码所示，默认`Set<CacheAnnotaionParser>`中只有一个 SpringCacheAnnotationParser ，因此初次调用某方法的时候会在 Cache 切面上首先调用 SpringCacheAnnotationParser 的方法：
-
-```java
-public class SpringCacheAnnotationParser implements CacheAnnotationParser, Serializable {
-    ......
-    @Override
-    @Nullable
-    public Collection<CacheOperation> parseCacheAnnotations(Method method) {
-        DefaultCacheConfig defaultConfig = new DefaultCacheConfig(method.getDeclaringClass());
-        return parseCacheAnnotations(defaultConfig, method);
-    }
-    ......
-}
-```
-
-来获取方法上的 Cache 相关注释，并将其封装成对应的 CacheOperation 集合并返回。
-
-其中：
-
-```java
-DefaultCacheConfig defaultConfig = new DefaultCacheConfig(method.getDeclaringClass());
-```
-
-首先判断方法所在的类上是否配置了 @CacheConfig 注释，如果有就将该注释中的属性值设置到 defaultConfig 类中，用于后续配置。
-
-然后调用核心方法：
-
-```java
-public class SpringCacheAnnotationParser implements CacheAnnotationParser, Serializable {
-    ......
-    @Nullable
-    private Collection<CacheOperation> parseCacheAnnotations(
-            DefaultCacheConfig cachingConfig, AnnotatedElement ae, boolean localOnly) {
-
-        Collection<? extends Annotation> anns = (localOnly ?
-                AnnotatedElementUtils.getAllMergedAnnotations(ae, CACHE_OPERATION_ANNOTATIONS) :
-                AnnotatedElementUtils.findAllMergedAnnotations(ae, CACHE_OPERATION_ANNOTATIONS));
-        if (anns.isEmpty()) {
-            return null;
-        }
-
-        final Collection<CacheOperation> ops = new ArrayList<>(1);
-        anns.stream().filter(ann -> ann instanceof Cacheable).forEach(
-                ann -> ops.add(parseCacheableAnnotation(ae, cachingConfig, (Cacheable) ann)));
-        anns.stream().filter(ann -> ann instanceof CacheEvict).forEach(
-                ann -> ops.add(parseEvictAnnotation(ae, cachingConfig, (CacheEvict) ann)));
-        anns.stream().filter(ann -> ann instanceof CachePut).forEach(
-                ann -> ops.add(parsePutAnnotation(ae, cachingConfig, (CachePut) ann)));
-        anns.stream().filter(ann -> ann instanceof Caching).forEach(
-                ann -> parseCachingAnnotation(ae, cachingConfig, (Caching) ann, ops));
-        return ops;
-    }
-    ......
-}
-```
-
-该方法中使用 Spring Core 模块的`AnnotatedElementUtils`来得到标注到可被标注对象（在这里包括类和方法）上的指定类型的注释，包括了注释上再打注释等层级结构以及层级属性的合并操作。
-
-整体逻辑是，首先获得标注在方法上的@Cacheable注释集合，并对其中的每个注释调用：
-
-```java
-private CacheableOperation parseCacheableAnnotation(
-        AnnotatedElement ae, DefaultCacheConfig defaultConfig, Cacheable cacheable) {
-
-    CacheableOperation.Builder builder = new CacheableOperation.Builder();
-
-    builder.setName(ae.toString());
-    builder.setCacheNames(cacheable.cacheNames());
-    builder.setCondition(cacheable.condition());
-    builder.setUnless(cacheable.unless());
-    builder.setKey(cacheable.key());
-    builder.setKeyGenerator(cacheable.keyGenerator());
-    builder.setCacheManager(cacheable.cacheManager());
-    builder.setCacheResolver(cacheable.cacheResolver());
-    builder.setSync(cacheable.sync());
-
-    defaultConfig.applyDefault(builder);
-    CacheableOperation op = builder.build();
-    validateCacheOperation(ae, op);
-
-    return op;
-}
-```
-
-利用`CacheableOperation.Builder`来构建一个`CacheableOperation`，并添加到`Collection<CacheOperation> ops`中。
-
-接下来对 @CacheEvict 和 @CachePut 也执行同样的操作，区别是它们分别使用 CacheEvictOperation.Builder 和 CachePutOperation.Builder 来构建 CacheEvictOperation 和 CachePutOperation。
-
-另外对于 @Caching，调用：
-
-```java
-private void parseCachingAnnotation(
-        AnnotatedElement ae, DefaultCacheConfig defaultConfig, Caching caching, Collection<CacheOperation> ops) {
-
-    Cacheable[] cacheables = caching.cacheable();
-    for (Cacheable cacheable : cacheables) {
-        ops.add(parseCacheableAnnotation(ae, defaultConfig, cacheable));
-    }
-    CacheEvict[] cacheEvicts = caching.evict();
-    for (CacheEvict cacheEvict : cacheEvicts) {
-        ops.add(parseEvictAnnotation(ae, defaultConfig, cacheEvict));
-    }
-    CachePut[] cachePuts = caching.put();
-    for (CachePut cachePut : cachePuts) {
-        ops.add(parsePutAnnotation(ae, defaultConfig, cachePut));
-    }
-}
-```
-
-其中对 caching 的 cacheable、evict 及 put 属性对应的各组 @Cacheable、@CacheEvict 及 @CachePut 注释分别调用前面介绍的执行逻辑来构建相应的 CacheOperation 并添加到`Collection<CacheOperation> ops`中，然后将其返回。
-
-当首次调用某方法执行上述的解析操作后，AnnotationCacheOperationSource会将其缓存起来，后续再调用该方法时会直接从缓存中得到该方法对应的`Collection<CacheOperation> ops`以增加效率。
-
-# 根据 CacheOperation 执行核心 Cache 业务逻辑
-
-## 核心业务逻辑源码分析
-
-对于打了 Cache 相关注释的类，在创建其 bean 的时候已经由 Spring AOP 为其创建代理增强，并将 BeanFactoryCacheOperationSourceAdvisor 加入其代理中。
-
- 当调用其方法的时候，会通过代理执行到 BeanFactoryCacheOperationSourceAdvisor 定义的切面。该切面是一个 PointcutAdvisor，在 Spring AOP 底层框架 DefaultAdvisorChainFactory.getInterceptorsAndDynamicInterceptionAdvice方法中使用
-
-```java
-pointcutAdvisor.getPointcut().getMethodMatcher().matches(method, targetClass))
-```
-
-来判断被调用方法是否匹配切点逻辑，如果匹配就执行其拦截器中的逻辑， BeanFactoryCacheOperationSourceAdvisor 中注册的拦截器是 CacheInterceptor，其执行逻辑为：
-
-```java
-public class CacheInterceptor extends CacheAspectSupport implements MethodInterceptor, Serializable {
-	@Override
-	@Nullable
-	public Object invoke(final MethodInvocation invocation) throws Throwable {
-		Method method = invocation.getMethod();
-
-		CacheOperationInvoker aopAllianceInvoker = () -> {
-			try {
-				return invocation.proceed();
-			}
-			catch (Throwable ex) {
-				throw new CacheOperationInvoker.ThrowableWrapper(ex);
-			}
-		};
-
-		Object target = invocation.getThis();
-		Assert.state(target != null, "Target must not be null");
-		try {
-			return execute(aopAllianceInvoker, target, method, invocation.getArguments());
-		}
-		catch (CacheOperationInvoker.ThrowableWrapper th) {
-			throw th.getOriginal();
-		}
-	}
-}
-```
-
-其中 Spring AOP 底层调用该方法时，传递来的参数`MethodInvocation invocation`是一个把调用方法 method 与其对应的切面拦截器 interceptors 组装成类似于 ChainFilter 一样的结构。
-
-CacheOperationInvoker 回调接口的意义是，将决定切面逻辑与实际调用方法顺序的权利转交给 CacheAspectSupport 的 execute 方法。
-该逻辑中调用了 CacheAspectSupport 的方法：
-
-```java
-public abstract class CacheAspectSupport extends AbstractCacheInvoker
-		implements BeanFactoryAware, InitializingBean, SmartInitializingSingleton {
-    ......
-    @Nullable
-    protected Object execute(CacheOperationInvoker invoker, Object target, Method method, Object[] args) {
-        // Check whether aspect is enabled (to cope with cases where the AJ is pulled in automatically)
-        if (this.initialized) {
-            Class<?> targetClass = getTargetClass(target);
-            CacheOperationSource cacheOperationSource = getCacheOperationSource();
-            if (cacheOperationSource != null) {
-                Collection<CacheOperation> operations = cacheOperationSource.getCacheOperations(method, targetClass);
-                if (!CollectionUtils.isEmpty(operations)) {
-                    return execute(invoker, method,
-                            new CacheOperationContexts(operations, method, args, target, targetClass));
-                }
-            }
-        }
-
-        return invoker.invoke();
-    }
-    ......
-}
-```
-
-该方法首先通过前面描述的`AnnotationCacheOperationSource.getCacheOperations(method, targetClass)`来获得调用方法上的`Collection<CacheOperation>`，然后将其和调用方法 method、方法参数 args、目标对象 target、目标类 targetClass 一起创建`CacheOperationContexts`：
-
-```java
-public abstract class CacheAspectSupport extends AbstractCacheInvoker
-		implements BeanFactoryAware, InitializingBean, SmartInitializingSingleton {
-    ......
-    private class CacheOperationContexts {
-
-        private final MultiValueMap<Class<? extends CacheOperation>, CacheOperationContext> contexts;
-
-        private final boolean sync;
-
-        public CacheOperationContexts(Collection<? extends CacheOperation> operations, Method method,
-                Object[] args, Object target, Class<?> targetClass) {
-
-            this.contexts = new LinkedMultiValueMap<>(operations.size());
-            for (CacheOperation op : operations) {
-                this.contexts.add(op.getClass(), getOperationContext(op, method, args, target, targetClass));
-            }
-            this.sync = determineSyncFlag(method);
-        }
-        ......
-    }
-}
-```
-
-其中，为每个 operation 分别创建 CacheOperationContext：
-
-```java
-public abstract class CacheAspectSupport extends AbstractCacheInvoker
-		implements BeanFactoryAware, InitializingBean, SmartInitializingSingleton {
-    ......
-    protected CacheOperationContext getOperationContext(
-            CacheOperation operation, Method method, Object[] args, Object target, Class<?> targetClass) {
-
-        CacheOperationMetadata metadata = getCacheOperationMetadata(operation, method, targetClass);
-        return new CacheOperationContext(metadata, args, target);
-    }
-    ......
-}
-```
-
-获取`CacheOperationMetadata metadata`时的较重要的动作就是获取 CacheOperation 中用 String 名称定义的 CacheResolver 和 KeyGenerator 的 bean。
-
-然后在创建 CacheOperationContext 时使用 CacheResolver bean 获得 cache 的信息：
-
-```java
-public abstract class CacheAspectSupport extends AbstractCacheInvoker
-		implements BeanFactoryAware, InitializingBean, SmartInitializingSingleton {
-    ......
-    protected class CacheOperationContext implements CacheOperationInvocationContext<CacheOperation> {
-        ......
-        public CacheOperationContext(CacheOperationMetadata metadata, Object[] args, Object target) {
-            this.metadata = metadata;
-            this.args = extractArgs(metadata.method, args);
-            this.target = target;
-            this.caches = CacheAspectSupport.this.getCaches(this, metadata.cacheResolver);
-            this.cacheNames = createCacheNames(this.caches);
-        }
-        ......
-    }
-    ......
-}
-```
-
-在创建完上下文 CacheOperationContexts 后，调用 SpringCache 真正的核心业务逻辑（`execute`）：
-
-```java
-public abstract class CacheAspectSupport extends AbstractCacheInvoker
-		implements BeanFactoryAware, InitializingBean, SmartInitializingSingleton {
-    ......
-    @Nullable
-    private Object execute(final CacheOperationInvoker invoker, Method method, CacheOperationContexts contexts) {
-        // Special handling of synchronized invocation
-        if (contexts.isSynchronized()) {
-            CacheOperationContext context = contexts.get(CacheableOperation.class).iterator().next();
-            if (isConditionPassing(context, CacheOperationExpressionEvaluator.NO_RESULT)) {
-                Object key = generateKey(context, CacheOperationExpressionEvaluator.NO_RESULT);
-                Cache cache = context.getCaches().iterator().next();
-                try {
-                    return wrapCacheValue(method, handleSynchronizedGet(invoker, key, cache));
-                }
-                catch (Cache.ValueRetrievalException ex) {
-                    // Directly propagate ThrowableWrapper from the invoker,
-                    // or potentially also an IllegalArgumentException etc.
-                    ReflectionUtils.rethrowRuntimeException(ex.getCause());
-                }
-            }
-            else {
-                // No caching required, only call the underlying method
-                return invokeOperation(invoker);
-            }
-        }
-
-
-        // Process any early evictions
-        // 首先判断是否需要在方法调用前执行缓存清除
-        processCacheEvicts(contexts.get(CacheEvictOperation.class), true,
-                CacheOperationExpressionEvaluator.NO_RESULT);
-
-        // Check if we have a cached item matching the conditions
-        // 然后检查是否能得到一个符合条件的缓存值
-        Cache.ValueWrapper cacheHit = findCachedItem(contexts.get(CacheableOperation.class));
-
-        // Collect puts from any @Cacheable miss, if no cached item is found
-        // 随后如果Cacheable miss（没有获取到缓存），就会创建一个对应的CachePutRequest并收集起来
-        List<CachePutRequest> cachePutRequests = new ArrayList<>();
-        if (cacheHit == null) {
-            collectPutRequests(contexts.get(CacheableOperation.class),
-                    CacheOperationExpressionEvaluator.NO_RESULT, cachePutRequests);
-        }
-
-        // 接下来判断返回缓存值还是实际调用方法的结果
-        Object cacheValue;
-        Object returnValue;
-
-        if (cacheHit != null && !hasCachePut(contexts)) {
-            // If there are no put requests, just use the cache hit
-            cacheValue = cacheHit.get();
-            returnValue = wrapCacheValue(method, cacheValue);
-        }
-        else {
-            // Invoke the method if we don't have a cache hit
-            returnValue = invokeOperation(invoker);
-            cacheValue = unwrapReturnValue(returnValue);
-        }
-
-        // Collect any explicit @CachePuts
-        // 方法调用后收集@CachePut明确定义的CachePutRequest
-        collectPutRequests(contexts.get(CachePutOperation.class), cacheValue, cachePutRequests);
-
-        // Process any collected put requests, either from @CachePut or a @Cacheable miss
-        // 执行CachePutRequest将符合条件的数据写入缓存
-        for (CachePutRequest cachePutRequest : cachePutRequests) {
-            cachePutRequest.apply(cacheValue);
-        }
-
-        // Process any late evictions
-        // 最后判断是否需要在方法调用后执行缓存清除
-        processCacheEvicts(contexts.get(CacheEvictOperation.class), false, cacheValue);
-
-        return returnValue;
-    }
-    ......
-}
-```
-
-
-
-**首先判断是否需要在方法调用前执行缓存清除**：
-
-```java
-processCacheEvicts(contexts.get(CacheEvictOperation.class), true,
-                CacheOperationExpressionEvaluator.NO_RESULT);
-```
-
-其作用是判断是否需要在方法调用前执行缓存清除。判断是否存在`beforeInvocation==true`并且 condition 符合条件的 @CacheEvict 注释，如果存在则最终执行方法：
-
-```java
-public abstract class CacheAspectSupport extends AbstractCacheInvoker
-		implements BeanFactoryAware, InitializingBean, SmartInitializingSingleton {
-    ......
-    private void processCacheEvicts(
-            Collection<CacheOperationContext> contexts, boolean beforeInvocation, @Nullable Object result) {
-
-        for (CacheOperationContext context : contexts) {
-            CacheEvictOperation operation = (CacheEvictOperation) context.metadata.operation;
-            if (beforeInvocation == operation.isBeforeInvocation() && isConditionPassing(context, result)) {
-                performCacheEvict(context, operation, result);
-            }
-        }
-    }
-
-    private void performCacheEvict(
-            CacheOperationContext context, CacheEvictOperation operation, @Nullable Object result) {
-
-        Object key = null;
-        for (Cache cache : context.getCaches()) {
-            if (operation.isCacheWide()) {
-                logInvalidating(context, operation, null);
-                doClear(cache, operation.isBeforeInvocation());
-            }
-            else {
-                if (key == null) {
-                    key = generateKey(context, result);
-                }
-                logInvalidating(context, operation, key);
-                doEvict(cache, key, operation.isBeforeInvocation());
-            }
-        }
-    }
-    ......
-}
-```
-
-对于注释中定义的每一个 cache 都根据 allEntries 是否为 true 执行其 clear() 方法或 evict(key) 方法来清除全部或部分缓存。
-
-
-
-**然后检查是否能得到一个符合条件的缓存值**：
-
-```java
-Cache.ValueWrapper cacheHit = findCachedItem(contexts.get(CacheableOperation.class));
-```
-
-
-
-**随后如果Cacheable miss（没有获取到缓存），就会创建一个对应的CachePutRequest并收集起来**：
-
-```java
-List<CachePutRequest> cachePutRequests = new ArrayList<>();
-if (cacheHit == null) {
-    collectPutRequests(contexts.get(CacheableOperation.class),
-            CacheOperationExpressionEvaluator.NO_RESULT, cachePutRequests);
-}
-```
-
-注意，此时方法尚未执行，因此第二个参数为CacheOperationExpressionEvaluator.NO_RESULT，意思是当前上下文中#result不存在。
-
-
-
-**接下来判断返回缓存值还是实际调用方法的结果**：
-
-如果得到了缓存，并且CachePutRequests为空并且不含有符合条件（condition match）的@CachePut注释，那么就将returnValue赋值为缓存值；否则实际执行方法，并将returnValue赋值为方法返回值。
-
-```java
-Object cacheValue;
-Object returnValue;
-
-if (cacheHit != null && !hasCachePut(contexts)) {
-    // If there are no put requests, just use the cache hit
-    cacheValue = cacheHit.get();
-    returnValue = wrapCacheValue(method, cacheValue);
-}
-else {
-    // Invoke the method if we don't have a cache hit
-    returnValue = invokeOperation(invoker);
-    cacheValue = unwrapReturnValue(returnValue);
-}
-```
-
-
-
-**方法调用后收集@CachePut明确定义的CachePutRequest**：
-
-收集符合条件的@CachePut定义的CachePutRequest，并添加到上面的cachePutRequests中
-
-```java
-collectPutRequests(contexts.get(CachePutOperation.class), cacheValue, cachePutRequests);
-```
-
-注意，此时处于方法调用后，返回结果已经存在了，因此在condition定义中可以使用上下文#result。
-
-
-
-**执行CachePutRequest将符合条件的数据写入缓存**：
-
-对于上面收集到的cachePutRequests，逐个调用其apply(cacheValue)方法
-
-```java
-for (CachePutRequest cachePutRequest : cachePutRequests) {
-    cachePutRequest.apply(cacheValue);
-}
-```
-
-其中，CachePutRequest.apply方法首先判断unless条件，unless不符合的时候才会对operationContext中的每一个cache执行put动作：
-
-```java
-public void apply(@Nullable Object result) {
-    if (this.context.canPutToCache(result)) {
-        for (Cache cache : this.context.getCaches()) {
-            doPut(cache, this.key, result);
-        }
-    }
-}
-```
-
-判断是否执行put动作的方法如下：
-
-```java
-protected boolean canPutToCache(@Nullable Object value) {
-    String unless = "";
-    if (this.metadata.operation instanceof CacheableOperation) {
-        unless = ((CacheableOperation) this.metadata.operation).getUnless();
-    }
-    else if (this.metadata.operation instanceof CachePutOperation) {
-        unless = ((CachePutOperation) this.metadata.operation).getUnless();
-    }
-    if (StringUtils.hasText(unless)) {
-        EvaluationContext evaluationContext = createEvaluationContext(value);
-        return !evaluator.unless(unless, this.metadata.methodKey, evaluationContext);
-    }
-    return true;
-}
-```
-
-
-
-**最后判断是否需要在方法调用后执行缓存清除**：
-
-```java
-processCacheEvicts(contexts.get(CacheEvictOperation.class), false, cacheValue);
-```
-
-与步骤（1）相对应，其作用是判断是否需要在方法调用后执行缓存清除。判断是否存在beforeInvocation==false并且condition符合条件的@CacheEvict注释，注意此时上下文中结果#result是可用的。如果存在则最终执行缓存清除逻辑。
-
-
-
-## 整体执行业务逻辑概述
-
-1. 首先执行@CacheEvict（如果beforeInvocation=true且condition通过），如果allEntries=true，则清空所有；
-2. 然后收集@Cacheable并检查是否能得到一个符合条件的缓存值；
-3. 如果@Cacheable的condition通过，并且key对应的数据不在缓存中，就创建一个CachePutRequest实例放入cachePutRequests中；
-4. 如果得到了缓存值并且cachePutRequests为空并且没有符合条件的@CachePut操作，那么将returnValue=缓存数据；
-5. 如果没有找到缓存，那么实际执行方法调用，并把返回结果放入returnValue；
-6. 收集符合条件的@CachePut操作(此时是方法执行后，condition上下文中#result可用)，并放入cachePutRequests；
-7. 执行cachePutRequests，将数据写入缓存（unless为空或者unless解析结果为false）；
-8. 执行@CacheEvict（如果beforeInvocation=false且condition通过），如果allEntries=true，则清空所有。
-
-
-
-
-
-
-
 # 参考资料
 
-[^1]: [SpringCache实现原理及核心业务逻辑_不动明王1984的博客](https://blog.csdn.net/m0_37962779/article/details/78671468)
-[^2]: [Spring cache原理详解 - 掘金 (juejin.cn)](https://juejin.cn/post/6959002694539444231)
+[^1]: [SpringCache实现原理及核心业务逻辑_不动明王1984的博客](https://blog.csdn.net/m0_37962779/article/details/78671468)：重要
+[^2]: [Spring cache原理详解 - 掘金 (juejin.cn)](https://juejin.cn/post/6959002694539444231)：重要
 [^3]: [浅析SpringBoot缓存原理探究、SpringCache常用注解介绍及如何集成Redis](https://itcn.blog/p/1648146775684444.html)
 [^4]: [spring cache原理——草丛里的码农](https://blog.csdn.net/wzl1369248650/article/details/95656093)
-[^5]: [Spring Cache 在 Springboot 中的实现与原理 - 掘金](https://juejin.cn/post/6904553882861436936)
+[^5]: [Spring Cache 在 Springboot 中的实现与原理 - 掘金](https://juejin.cn/post/6904553882861436936)：重要
 
 [^6]: [CacheAble、CachePut、CacheEvict的注解底层逻辑解析_一名假人的博客](https://blog.csdn.net/qq_43719932/article/details/112651226)
-[^7]: [玩转Spring Cache --- @Cacheable/@CachePut/@CacheEvict缓存注解相关基础类打点【享学Spring】_方向盘(YourBatman)的博客](https://fangshixiang.blog.csdn.net/article/details/94603480)
 
-[Spring缓存基础设施介绍 | Java工匠 (czwer.github.io)](https://czwer.github.io/2018/06/02/Spring缓存基础设施介绍/)：重要
-[Spring缓存管理原理 | Java工匠 (czwer.github.io)](https://czwer.github.io/2018/06/02/Spring缓存管理原理/)：重要
+[^7]: [玩转Spring Cache --- @Cacheable/@CachePut/@CacheEvict缓存注解相关基础类打点【享学Spring】_方向盘(YourBatman)的博客](https://fangshixiang.blog.csdn.net/article/details/94603480)
+[^8]: [玩转Spring Cache --- @Cacheable/@CachePut/@CacheEvict注解的原理深度剖析和使用【享学Spring】_方向盘](https://fangshixiang.blog.csdn.net/article/details/94570960)
+[^9]: [Spring缓存基础设施介绍 | Java工匠 (czwer.github.io)](https://czwer.github.io/2018/06/02/Spring缓存基础设施介绍/)：重要
+
+10 [Spring缓存管理原理 | Java工匠 (czwer.github.io)](https://czwer.github.io/2018/06/02/Spring缓存管理原理/)：重要
