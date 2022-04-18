@@ -1,5 +1,6 @@
 ---
 typora-copy-images-to: SpringBootNotesPictures
+
 ---
 
 # SpringBoot 整合 Redis[^1]
@@ -591,23 +592,236 @@ spring.redis.port=6379
 spring.redis.database=0
 ```
 
-https://github.com/redisson/redisson/wiki/14.-Integration-with-frameworks
 
-https://appapi.w3cschool.cn/article/41601219.html
 
-https://springboot.io/t/topic/1250
+# SpringCache 整合 Redisson[^9]
 
-[(43条消息) SpringBoot cache 集成 redisson_往日时光--的博客-CSDN博客_redissonclient](https://blog.csdn.net/qq_44605317/article/details/106940677)
+## 依赖
+
+```xml
+<dependencies>
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-cache</artifactId>
+    </dependency>
+
+    <dependency>
+        <groupId>org.redisson</groupId>
+        <artifactId>redisson-spring-boot-starter</artifactId>
+        <version>3.17.0</version>
+    </dependency>
+
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+</dependencies>
+```
+
+## 配置
+
+```java
+package com.example;
+
+import org.redisson.Redisson;
+import org.redisson.api.RedissonClient;
+import org.redisson.config.Config;
+import org.redisson.spring.cache.CacheConfig;
+import org.redisson.spring.cache.RedissonSpringCacheManager;
+import org.springframework.cache.CacheManager;
+import org.springframework.cache.annotation.EnableCaching;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+import java.util.HashMap;
+
+/**
+ * @author c00018397
+ * @date 2022/4/15
+ */
+@Configuration
+@EnableCaching
+public class RedissonConfig {
+    @Bean
+    RedissonClient redissonClient() {
+        Config config = new Config();
+        config.useSingleServer().setAddress("redis://127.0.0.1:6379").setDatabase(0);
+        return Redisson.create(config);
+    }
+
+    @Bean
+    CacheManager redissonCacheManager(RedissonClient redissonClient) {
+        HashMap<String, CacheConfig> config = new HashMap<>();
+        // create "testRedisson" cache with ttl = 24 minutes(过期时间) and maxIdleTime = 12 minutes(最长空闲时间)
+        config.put("testRedisson", new CacheConfig(24 * 60 * 1000, 12 * 60 * 1000));
+        return new RedissonSpringCacheManager(redissonClient);
+    }
+}
+```
+
+## controller
+
+```java
+package com.example;
+
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+/**
+ * @author c00018397
+ * @date 2022/4/15
+ */
+@RestController
+@RequestMapping("/redisson")
+public class SpringCacheRedissonController {
+    @GetMapping("/get")
+    @Cacheable(value = "redisson_cache", key = "#id")
+    public String get(Integer id) {
+        System.out.println("没有走缓存");
+        return "redisson test";
+    }
+
+    /**
+     * 删除缓存的时候，需要 value 和 key，可以使用 allEntries = true 删除所有缓存
+     * @param id key
+     */
+    @GetMapping("/delete")
+    @CacheEvict(value = "redisson_cache", key = "#id")
+    public void delete(Integer id) {
+        System.out.println("删除缓存！");
+    }
+}
+```
+
+
+
+# Redisson 发布订阅[^13]
+
+## Car
+
+```java
+package com.example;
+
+import java.io.Serializable;
+
+/**
+ * @author c00018397
+ * @date 2022/4/15
+ */
+public class Car implements Serializable {
+    private static final Long serialVersionUID = -1L;
+    private Double price;
+    private String color;
+
+    public Car(Double price, String color) {
+        this.price = price;
+        this.color = color;
+    }
+    ......
+}
+
+```
+
+## Client
+
+```java
+package com.example;
+
+import org.redisson.Redisson;
+import org.redisson.api.RTopic;
+import org.redisson.api.RedissonClient;
+import org.redisson.api.listener.MessageListener;
+import org.redisson.codec.SerializationCodec;
+import org.redisson.config.Config;
+
+/**
+ * @author c00018397
+ * @date 2022/4/15
+ */
+public class Client {
+    public static void main(String[] args) {
+        RedissonClient redissonClient = null;
+        Config config = new Config();
+        config.useSingleServer().setAddress("redis://127.0.0.1:6379").setDatabase(0);
+        redissonClient = Redisson.create(config);
+
+        RTopic topic = redissonClient.getTopic("test", new SerializationCodec());
+        topic.addListener(Car.class, new MessageListener<Car>() {
+            @Override
+            public void onMessage(CharSequence charSequence, Car car) {
+                System.out.println("onMessage: " + charSequence);
+                System.out.println(car.toString());
+            }
+        });
+    }
+}
+```
+
+
+
+
+
+## Server
+
+```java
+package com.example;
+
+import org.redisson.Redisson;
+import org.redisson.api.RTopic;
+import org.redisson.api.RedissonClient;
+import org.redisson.codec.SerializationCodec;
+import org.redisson.config.Config;
+
+import java.util.concurrent.TimeUnit;
+
+/**
+ * @author c00018397
+ * @date 2022/4/15
+ */
+public class Server {
+    public static void main(String[] args) throws InterruptedException {
+        RedissonClient redissonClient = null;
+        Config config = new Config();
+        config.useSingleServer().setAddress("redis://127.0.0.1:6379");
+        redissonClient = Redisson.create(config);
+
+        RTopic topic = redissonClient.getTopic("test", new SerializationCodec());
+        while (true) {
+            topic.publish(new Car(120000.0, "white"));
+            TimeUnit.SECONDS.sleep(5);
+        }
+    }
+}
+```
+
+
+
+
 
 # 参考资料
 
 [^1]: [SpringBoot整合Redis，一篇解决缓存的所有问题_程序猿小亮的博客-CSDN博客](https://xiaoliang.blog.csdn.net/article/details/118677483)
 [^2]: [SpringBoot整合Spring Cache，简化分布式缓存开发](https://blog.csdn.net/jiuqiyuliang/article/details/118794044)
-[^3]:[SpringBoot学习(七):集成Redis并结合Spring Cache使用 | 猿码记 (liuqh.icu)](http://liuqh.icu/2020/09/17/springboot-7-redis/)
-[^4]:[使用 Spring Cache + Redis 作为缓存 - 简书 (jianshu.com)](https://www.jianshu.com/p/931484bb3fdc)
-[^5]:[Spring Boot缓存实战 Redis 设置有效时间和自动刷新缓存，时间支持在配置文件中配置](https://www.jianshu.com/p/275cb42080d9)
-[^6]:[SpringBoot2.x系列教程之中利用Redis实现缓存功能详细教程](https://blog.csdn.net/GUDUzhongliang/article/details/122053095)
-[^7]:[玩转Spring Cache --- 整合分布式缓存Redis Cache（使用Lettuce、使用Spring Data Redis）](https://fangshixiang.blog.csdn.net/article/details/95047822)(重要)
+[^3]: [SpringBoot学习(七):集成Redis并结合Spring Cache使用 | 猿码记 (liuqh.icu)](http://liuqh.icu/2020/09/17/springboot-7-redis/)
+[^4]: [使用 Spring Cache + Redis 作为缓存 - 简书 (jianshu.com)](https://www.jianshu.com/p/931484bb3fdc)
+[^5]: [Spring Boot缓存实战 Redis 设置有效时间和自动刷新缓存，时间支持在配置文件中配置](https://www.jianshu.com/p/275cb42080d9)
+[^6]: [SpringBoot2.x系列教程之中利用Redis实现缓存功能详细教程](https://blog.csdn.net/GUDUzhongliang/article/details/122053095)
+[^7]: [玩转Spring Cache --- 整合分布式缓存Redis Cache（使用Lettuce、使用Spring Data Redis）](https://fangshixiang.blog.csdn.net/article/details/95047822)(重要)
 
-[SpringBoot实现Redis缓存（SpringCache+Redis的整合）](https://blog.csdn.net/user2025/article/details/106595257)
+[^8]: [SpringBoot实现Redis缓存（SpringCache+Redis的整合）](https://blog.csdn.net/user2025/article/details/106595257)
+[^9]: https://github.com/redisson/redisson/wiki/14.-Integration-with-frameworks
+[^10]: [使用redisson作为redis客户端](https://springboot.io/t/topic/1250)
+[^11]: [SpringBoot整合Redisson](https://appapi.w3cschool.cn/article/41601219.html)
+
+[^12]: [SpringBoot cache 集成 redisson_往日时光--的博客](https://blog.csdn.net/qq_44605317/article/details/106940677)
+[^13]: [redisson实现发布订阅_focus-unchangedthing的博客-CSDN博客](https://blog.csdn.net/themagickeyjianan/article/details/120167578)
+
+[^14]: [从头开始学Redisson（订阅分发）_小大宇的博客-CSDN博客](https://blog.csdn.net/yanluandai1985/article/details/104824045)
+
+
+
+
 
