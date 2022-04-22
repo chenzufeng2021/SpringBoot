@@ -9,6 +9,8 @@ https://gitee.com/rstyro/spring-boot/blob/master/SpringBoot2-Redisson/src/main/j
 
 https://blog.51cto.com/u_15239532/2835954
 
+https://blog.csdn.net/qq_42105629/article/details/102589319
+
 # SpringBoot 整合 Redis[^1]
 
 Spring Data Redis对Redis底层开发包（Jedis、Lettuce、JRedis、RJC）进行了高度封装，其中`lettuce`是Redis连接池未来的发展趋势，2.x开始已经**推荐使用**`lettuce`作为访问`redis`的client客户端。RedisTemplate封装提供了Redis各种操作、异常处理及序列化，完全屏蔽里底层实现（使用者面向Spring Data编程即可，可完全不用关心底层到底使用的是Jedis or Lettuce）[^7]。
