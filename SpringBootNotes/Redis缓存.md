@@ -4,7 +4,10 @@ typora-copy-images-to: SpringBootNotesPictures
 ---
 
 https://blog.csdn.net/yanluandai1985/article/details/104824045
+
 https://gitee.com/rstyro/spring-boot/blob/master/SpringBoot2-Redisson/src/main/java/top/lrshuai/redisson/subscribe/Subscribe.java
+
+https://blog.51cto.com/u_15239532/2835954
 
 # SpringBoot 整合 Redis[^1]
 
