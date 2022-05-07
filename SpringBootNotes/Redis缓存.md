@@ -3,6 +3,15 @@ typora-copy-images-to: SpringBootNotesPictures
 
 ---
 
+Redisson:
+
+http://www.javashuo.com/article/p-hqujfqxv-by.html
+
+https://blog.csdn.net/WTUDAN/article/details/123202119
+
+https://www.jianshu.com/p/e9b26c743cae?ivk_sa=1024320u
+
+
 https://blog.csdn.net/yanluandai1985/article/details/104824045
 
 https://gitee.com/rstyro/spring-boot/blob/master/SpringBoot2-Redisson/src/main/java/top/lrshuai/redisson/subscribe/Subscribe.java
