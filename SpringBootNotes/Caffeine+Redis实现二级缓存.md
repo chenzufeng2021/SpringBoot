@@ -2,6 +2,9 @@
 typora-copy-images-to: SpringBootNotesPictures
 ---
 
+[基于Spring接口，集成Caffeine+Redis两级缓存](https://mp.weixin.qq.com/s?__biz=Mzk0MzIyMDA1OA==&mid=2247496741&idx=3&sn=f90fe9f34272e1029be02bc58c880a45&chksm=c3358010f442090696445dab7464027017472d64786280d046b9c011e8b1f9709175e72160cd&mpshare=1&srcid=0418FT7Gjmi3eCGZv8eOS9SD&sharer_sharetime=1650258387650&sharer_shareid=676c14c6306d91a5a7bff73493d5388f&from=singlemessage&scene=1&subscene=10000&clicktime=1650261586&enterid=1650261586&ascene=1&devicetype=android-31&version=2800153b&nettype=WIFI&lang=zh_CN&exportkey=A%2BzQsS%2FrhwbJf%2Bbsr5uw2bk%3D&pass_ticket=3qDrioSMBhPvDH%2B8nwB1PF66ir2xflo7WhDGtNH4B7GWmzpbw9k5s%2BSJj1qhKMv4&wx_header=3)
+非常重要
+
 # 二级缓存概念
 
 关系数据库(Mysql)数据最终存储在磁盘上，如果每次都从数据库里去读取，会因为磁盘本身的IO影响读取速度，所以就有了像redis这种的==内存缓存==。
