@@ -276,5 +276,5 @@ protected List<String> getCandidateConfigurations(AnnotationMetadata metadata,
 [^2]: [Jasypt integration for Spring boot (github.com)](https://github.com/ulisesbocchio/jasypt-spring-boot)
 [^3]: [Spring boot使用jasypt加密原理解析_const伐伐的博客-CSDN博客_stringencryptor](https://blog.csdn.net/u013905744/article/details/86508236)
 
-
+重要https://blog.csdn.net/runlion_123/article/details/107056608：原理
 
