@@ -57,3 +57,4 @@ AOP：
 
 https://blog.csdn.net/u012060033/article/details/98088820
 
+redis 集群模式：https://segmentfault.com/a/1190000022808576
